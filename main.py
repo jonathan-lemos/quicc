@@ -1,11 +1,19 @@
-from copy import deepcopy
 from functools import reduce
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple, TypeVar
 
+
+T = TypeVar("T")
 
 # first is the set of rules (str -> Set[Tuple[str]])
 # second is the start symbol
 cfg_type = Tuple[Dict[str, Set[Tuple[str]]], str]
+
+
+def first(fn: Callable[[T], bool], c: List[T]) -> int:
+    for i in range(len(c)):
+        if fn(c[i]):
+            return i
+    return -1
 
 
 def cfg_tostring(ip: cfg_type) -> str:
@@ -57,19 +65,57 @@ def parse_cfg(ip: List[str]) -> cfg_type:
 # removes indirect left recursion
 def remove_ilr(ip: cfg_type) -> cfg_type:
     productions: Dict[str, Set[Tuple[str]]] = ip[0]
-    ret = deepcopy(ip)
+    ret: Dict[str, Set[Tuple[str]]] = {}
     for nt1 in productions:
         nt1: str = nt1
         for nt2 in productions:
             nt2: str = nt2
+            new: Set[Tuple[str]] = set()
             for rule in productions[nt1]:
                 rule: Tuple[str] = rule
-                if rule[0] == nt2:
-                    productions[nt1].remove(rule)
+                index = first(lambda x: x != nt1, list(rule))
+                if index == -1:
+                    raise Exception("Cannot have production of only itself in a CFG (\"" + nt1 + "\"")
+                if index > 0:
+                    for rhs in productions[nt2]:
+                        new.add(tuple(list(rhs) + list(rule[index:])))
+                else:
+                    new.add(rule)
+            if nt1 not in ret:
+                ret[nt1] = new
+            else:
+                for e in new:
+                    ret[nt1].add(e)
+    return ret, ip[1]
+
+
+# remove direct left recursion
+def remove_dlr(ip: cfg_type) -> cfg_type:
+    productions: Dict[str, Set[Tuple[str]]] = ip[0]
+    ret: Dict[str, Set[Tuple[str]]] = {}
+    for nt in productions:
+        nt: str = nt
+        ret[nt] = set()
+
+        def f(y): return y != nt
+
+        lrec: List[Tuple[str, Tuple[str]]] = [(x[:first(f, list(x))], x[first(f, list(x)):]) for x in productions[nt] if first(f, list(x)) != -1 and first(f, list(x)) > 0]
+        notlrec: List[Tuple[str]] = [x for x in productions[nt] if first(f, list(x)) == 0]
+        ntp = nt + "'"
+
+        for n in notlrec:
+            ret[nt].add(tuple(list(n) + [ntp]))
+
+        ret[ntp] = {("#",)}
+
+        for a, b in lrec:
+            ret[ntp].add(tuple(list(b) + [a]))
+    return ret, ip[1]
 
 
 def main():
-    x = parse_cfg(["S -> 0 S 0 | 1 S 1 | A", "A -> 0 A | #"])
+    x = parse_cfg(["S -> S A | B", "A -> a", "B -> b"])
+    y = remove_dlr(x)
     print(cfg_tostring(x))
 
 
