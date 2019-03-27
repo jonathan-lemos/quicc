@@ -1,11 +1,13 @@
 from functools import reduce
+from copy import deepcopy
+import itertools
 from typing import Callable, Dict, List, Sequence, Set, Tuple, TypeVar
 
 
 T = TypeVar("T")
 
 
-def first(fn: Callable[[T], bool], c: List[T]) -> int:
+def first(fn: Callable[[T], bool], c: Sequence[T]) -> int:
     for i in range(len(c)):
         if fn(c[i]):
             return i
@@ -44,38 +46,44 @@ class Ruleset:
 
         self.start = cfg[0].split("->")[0].strip() if len(cfg) > 0 else ""
 
-    def remove_recursion(self):
-        ret: Dict[str, Set[Tuple[str]]] = {}
-        for nt1 in list(self.rules):
+    def remove_epsilon(self):
+        rules_iter = list(self.rules)
+        for nt1 in rules_iter:
             nt1: str = nt1
-            for nt2 in list(self.rules):
+            if len([x for x in self.rules[nt1] if x == '#']) == 0:
+                continue
+            for nt2 in rules_iter:
                 nt2: str = nt2
-                new: Set[Tuple[str]] = set()
-                for rule in self.rules[nt1]:
+                eps = filter(lambda x: x[1] > 0, [(x, x.count(nt1)) for x in self.rules[nt2]])
+                for rule in eps:
+                    bitstrings = ["".join(seq) for seq in itertools.product("01", repeat=rule[1])]
+                    self.rules[nt2].remove(rule[0])
+
+    def remove_recursion(self):
+        rules_iter = list(self.rules)
+        for nt1 in rules_iter:
+            nt1: str = nt1
+            for nt2 in rules_iter:
+                nt2: str = nt2
+                cur_rules = deepcopy(self.rules[nt1])
+                for rule in cur_rules:
                     rule: Tuple[str] = rule
-                    index = first(lambda x: x != nt1, list(rule))
+                    index = first(lambda x: x != nt2, rule)
                     if index == -1:
-                        raise Exception("Cannot have production of only itself in a CFG (\"" + nt1 + "\"")
+                        raise Exception("Cannot have a production of only itself")
                     if index > 0:
-                        for rhs in self.rules[nt2]:
-                            new.add(tuple(list(rhs) + list(rule[index:])))
-                    else:
-                        new.add(rule)
-                if nt1 not in ret:
-                    ret[nt1] = new
-                else:
-                    for e in new:
-                        ret[nt1].add(e)
-                self.rules[nt1] = new
-                self.remove_dlr(nt1)
+                        self.rules[nt1].remove(rule)
+                        for r in self.rules[nt2]:
+                            self.rules[nt1].add(tuple((list(r) * index) + list(rule[index:])))
+            self.remove_dlr(nt1)
 
     def remove_dlr(self, rule: str):
         new_rule = set()
 
         def f(y): return y != rule
 
-        lrec: List[Tuple[str, Tuple[str]]] = [(x[:first(f, list(x))], x[first(f, list(x)):]) for x in self.rules[rule] if first(f, list(x)) != -1 and first(f, list(x)) > 0]
-        notlrec: List[Tuple[str]] = [x for x in self.rules[rule] if first(f, list(x)) == 0]
+        lrec: List[Tuple[str, Tuple[str]]] = [(x[:first(f, x)], x[first(f, x):]) for x in self.rules[rule] if first(f, x) != -1 and first(f, x) > 0]
+        notlrec: List[Tuple[str]] = [x for x in self.rules[rule] if first(f, x) == 0]
         ruleprime = rule + "'"
 
         if len(lrec) == 0:
@@ -87,7 +95,7 @@ class Ruleset:
         new_rule_prime = {("#",)}
 
         for a, b in lrec:
-            new_rule_prime.add(tuple(list(b) + list(a)))
+            new_rule_prime.add(tuple(list(a)[1:] + list(b) + [ruleprime]))
 
         self.rules[rule] = new_rule
         self.rules[ruleprime] = new_rule_prime
@@ -108,7 +116,7 @@ class Ruleset:
 
 
 def main():
-    x = Ruleset(["S -> Ab", "A -> # | Sc"])
+    x = Ruleset(["S -> A B w", "A -> X m", "X -> S p | b", "B -> a"])
     x.remove_recursion()
     print(str(x))
 
