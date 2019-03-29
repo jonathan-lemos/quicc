@@ -47,6 +47,15 @@ class Grammar:
                 output.append(tuple(tmp))
         return output
 
+    """
+    Internal method. Do not use outside of class
+    Returns the indices where a particular element appears in a sequence
+    
+    Example: AbcAdeA would become (0, 3, 6)
+    :param l: The sequence
+    :param s: The token to get the indices of
+    :returns: The indices
+    """
     @staticmethod
     def __indices(l: Sequence[__T], s: __T) -> Tuple[int]:
         indices = []
@@ -226,14 +235,25 @@ class Grammar:
         if r == self.__start:
             ret.add("$")
         for rule in self:
-            indexes = self.__indices(rule, r)
-            for index in indexes:
-                if index < len(rule) - 1:
-                    ch = rule[index + 1]
-                    ret = ret | self.first_set(ch)
-                else:
-                    ch = rule[index]
-                    ret = ret | self.follow_set(ch)
+            for production in self.__rules[rule]:
+                indexes = self.__indices(production, r)
+                for index in indexes:
+                    rem = list(production[index + 1:])
+                    cur = set()
+                    hit = False
+                    while len(rem) > 0:
+                        fs = self.first_set(rem[0])
+                        cur |= fs
+                        if "#" not in fs:
+                            hit = True
+                            break
+                        rem = rem[1:]
+                    if not hit:
+                        cur |= self.follow_set(rule)
+                    if "#" in cur:
+                        cur.remove("#")
+                    ret |= cur
+        return ret
 
     def __remove_dlr(self, rule: str):
         new_rule = set()
@@ -267,29 +287,29 @@ class Grammar:
     def __iter__(self):
         x = self.__start
         y = [x for x in self.__rules if x != self.__start]
-        q = [x] + y
         return iter([x] + y)
 
     def __len__(self):
         return len(self.__rules)
 
     def __str__(self):
-        q = [(x, self.__rules[x]) for x in self]
         return reduce(lambda a, v: a + "\n" + v[0] + " -> " + reduce(lambda d, e: d + " | " + reduce(lambda b, c: b + " " + (c if c != "#" else "Ɛ"), e, "")[1:], v[1], "")[3:], [(x, self.__rules[x]) for x in self], "")[1:]
 
 
 def main():
-    x = Grammar(["S -> A B w", "A -> X m", "X -> S p | b", "B -> a"])
+    x = Grammar([
+        "E -> T E’",
+        "E’ -> + T E’ | #",
+        "T -> F T’",
+        "T’ -> * F T’ | #",
+        "F -> ( E ) | id"])
     print(x)
     print()
     for rule in x:
         print(rule + ": " + str(x.first_set(rule)))
     print()
-    x.remove_recursion()
-    print(x)
-    print()
     for rule in x:
-        print(rule + ": " + str(x.first_set(rule)))
+        print(rule + ": " + str(x.follow_set(rule)))
 
 
 if __name__ == '__main__':
