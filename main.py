@@ -1,7 +1,36 @@
 from functools import reduce
 from copy import deepcopy
 import itertools
-from typing import Callable, Dict, List, Sequence, Set, Tuple, TypeVar
+from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple, TypeVar
+
+
+class Rule:
+    __nonterm: str
+    __productions: Set[Tuple[str]] = set()
+
+    def __init__(self, nonterm: str, *a: Tuple[str]):
+        self.__nonterm = nonterm
+        self.__productions = set(*a)
+
+    def add(self, *s: Tuple[str]):
+        self.__productions.add(*s)
+
+    def remove(self, *s: Tuple[str]):
+        for a in s:
+            if a in self.__productions:
+                self.__productions.remove(a)
+
+    def __contains__(self, item: Tuple[str]):
+        return item in self.__productions
+
+    def __iter__(self):
+        return iter(self.__productions)
+
+    def __len__(self):
+        return len(self.__productions)
+
+    def __str__(self):
+        return self.__nonterm + " -> " + reduce(lambda a, b: " | " + reduce(lambda c, d: c + " " + d, b, "")[1:], self.__productions, "")[3:]
 
 
 class Grammar:
