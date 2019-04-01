@@ -1,7 +1,8 @@
 from functools import reduce
 from copy import deepcopy
 import itertools
-from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple, TypeVar
+import re
+from typing import Callable, Dict, Iterable, List, Pattern, Sequence, Set, Tuple, TypeVar, Union
 
 
 class Grammar:
@@ -96,10 +97,18 @@ class Grammar:
         cur: str = ""
         quote = False
         escape = False
+        last_ws = True
         for c in rhs + " ":
             if escape:
+                if c == "t":
+                    cur += "\t"
+                    continue
+                if c == "n":
+                    cur += "\n"
+                    continue
                 cur += c
                 escape = False
+                last_ws = False
                 continue
             if c == " ":
                 if not quote:
@@ -108,15 +117,20 @@ class Grammar:
                     cur = ""
                 else:
                     cur += c
+                last_ws = True
                 continue
             if c == "\"":
-                cur += c
+                if not quote and not last_ws:
+                    raise Exception("Quotes can only appear as complete tokens")
                 quote = not quote
+                last_ws = False
                 continue
-            if c == "\\":
+            if c == "\\" and not quote:
                 escape = True
+                last_ws = False
                 continue
             cur += c
+            last_ws = False
         if quote:
             raise Exception("Missing closing quote")
         if escape:
@@ -176,7 +190,8 @@ class Grammar:
         for rule in self.__rules[r]:
             c = rule[0]
             if c in self.__rules:
-                ret = ret.union(self.__first_set(c, start, False))
+                if c != r:
+                    ret = ret.union(self.__first_set(c, start, False))
             else:
                 ret.add(c)
         return ret
@@ -311,6 +326,40 @@ class Grammar:
 
         return ret
 
+    def lex(self, ip: Iterable[str]) -> Sequence[Tuple[str, Union[Pattern[str], None]]]:
+        tokens: Set[Pattern[str]] = set()
+        for nt in self:
+            for prod in self[nt]:
+                for tok in prod:
+                    if tok not in self:
+                        if tok.startswith("r\""):
+                            tok = tok[2:-1]
+                            if not tok.startswith("^"):
+                                tok = "^" + tok
+                            tokens.add(re.compile(tok))
+                        else:
+                            if tok.startswith("\""):
+                                tok = tok[1:-1]
+                            tokens.add(re.compile("^" + re.escape(tok)))
+
+        ret: List[Tuple[str, Union[Pattern[str], None]]] = []
+        for line in ip:
+            line = line.strip()
+            while line != "":
+                longest: Tuple[str, Union[re, None]] = ("", None)
+                for regex in tokens:
+                    m = re.match(regex, line)
+                    if m is not None:
+                        longest = (m[0], regex) if len(m[0]) > len(longest[0]) else longest
+                if longest[0] == "":
+                    ret.append((line[0], None))
+                    line = line[1:].strip()
+                else:
+                    ret.append(longest)
+                    line = line[len(longest[0]):].strip()
+
+        return ret
+
     def __remove_dlr(self, rule: str):
         new_rule = set()
 
@@ -357,20 +406,40 @@ class Grammar:
 
 def main():
     x = Grammar([
-        "E -> T E’",
-        "E’ -> + T E’ | #",
-        "T -> F T’",
-        "T’ -> * F T’ | #",
-        "F -> ( E ) | id"])
-    print(x)
-    print()
-    fs = x.first_sets()
-    for s in fs:
-        print(s + ": " + str(fs[s]))
-    print()
-    os = x.follow_sets()
-    for s in os:
-        print(s + ": " + str(os[s]))
+        "program -> declaration-list",
+        "declaration-list -> declaration-list declaration | declaration",
+        "declaration -> var-declaration | fun-declaration",
+        "var-declaration -> type-specifier ID ; | type-specifier ID [ NUM ] ;",
+        "type-specifier -> int | void | float",
+        "fun-declaration -> type-specifier ID ( params ) compound-stmt",
+        "params -> param-list | void",
+        "param-list -> param-list , param | param",
+        "param -> type-specifier ID | type-specifier ID [ ]",
+        "compound-stmt -> { local-declarations statement-list }",
+        "local-declarations -> local-declarations var-declaration | #",
+        "statement-list -> statement-list statement | #",
+        "statement -> expression-stmt | compound-stmt | selection-stmt | iteration-stmt | return-stmt",
+        "expression-stmt -> expression ; | ;",
+        "selection-stmt -> if ( expression ) statement | if ( expression ) statement else statement",
+        "iteration-stmt -> while ( expression ) statement",
+        "return-stmt -> return ; | return expression ;",
+        "expression -> var = expression | simple-expression",
+        "var -> ID | ID [ expression ]",
+        "simple-expression -> additive-expression relop additive-expression | additive-expression",
+        "relop -> <= | < | > | >= | == | !=",
+        "additive-expression -> additive-expression addop term | term",
+        "addop -> + | -",
+        "term -> term mulop factor | factor",
+        "mulop -> * | /",
+        "factor -> ( expression ) | var | call | NUM",
+        'NUM -> "\\d+" | "\\d+\\.\\d+"',
+        'ID -> "[a-zA-Z]+"'
+    ])
+    print(x.lex([
+        "int main(void) {",
+        "   return 0;",
+        "}"
+    ]))
 
 
 if __name__ == '__main__':
