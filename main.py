@@ -4,35 +4,6 @@ import itertools
 from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple, TypeVar
 
 
-class Rule:
-    __nonterm: str
-    __productions: Set[Tuple[str]] = set()
-
-    def __init__(self, nonterm: str, *a: Tuple[str]):
-        self.__nonterm = nonterm
-        self.__productions = set(*a)
-
-    def add(self, *s: Tuple[str]):
-        self.__productions.add(*s)
-
-    def remove(self, *s: Tuple[str]):
-        for a in s:
-            if a in self.__productions:
-                self.__productions.remove(a)
-
-    def __contains__(self, item: Tuple[str]):
-        return item in self.__productions
-
-    def __iter__(self):
-        return iter(self.__productions)
-
-    def __len__(self):
-        return len(self.__productions)
-
-    def __str__(self):
-        return self.__nonterm + " -> " + reduce(lambda a, b: " | " + reduce(lambda c, d: c + " " + d, b, "")[1:], self.__productions, "")[3:]
-
-
 class Grammar:
     __rules: Dict[str, Set[Tuple[str]]] = {}
     __start: str = ""
@@ -93,6 +64,14 @@ class Grammar:
                 indices.append(i)
         return tuple(indices)
 
+    """
+    Internal method. Do not use outside of class
+    Returns the first index that matches a given lambda
+    
+    :param fn: The lambda to check. Returns true if iteration should stop.
+    :param c: A sequence to iterate over
+    :returns: The index, or -1 if not found
+    """
     @staticmethod
     def __first(fn: Callable[[__T], bool], c: Sequence[__T]) -> int:
         for i in range(len(c)):
@@ -100,8 +79,19 @@ class Grammar:
                 return i
         return -1
 
+    """
+    Internal method. Do not use outside of class
+    Lexes a production's right hand side into a sequence of tokens.
+    For example, 'A B cde "fgh ijk" r"[0-9]+"' turns into ['A', 'B', 'cde', '"fgh ijk"', 'r"[0-9]+"']
+    
+    Spaces in quotations are preserved.
+    r"string" denotes a regex.
+    
+    :param rhs: The string to lex
+    :returns: The sequence of tokens
+    """
     @staticmethod
-    def __lex_rhs(rhs: str) -> Tuple[str]:
+    def __lex_rhs(rhs: str) -> Sequence[str]:
         ret: List[str] = []
         cur: str = ""
         quote = False
@@ -131,8 +121,23 @@ class Grammar:
             raise Exception("Missing closing quote")
         if escape:
             raise Exception("Escape at end of string")
-        return tuple(ret)
+        return ret
 
+    """
+    Constructs a grammar out of a set of rules
+    Rules are given as a list of strings.
+    Each string looks like the following:
+    
+    nonterm -> term nonterm term ab c | # | "ab c" r"[0-9]+"
+    
+    Tokens are separated by spaces.
+    A regex can be given with r"your_regex_here"
+    Any token in quotes preserves spaces
+    A quote can be escaped with \"
+    
+    :param cfg: A list of rules as described above
+    :raise Exception: Error parsing cfg
+    """
     def __init__(self, cfg: Sequence[str] = ()):
         for rule in cfg:
             # split name of rule and its right hand side
@@ -182,6 +187,7 @@ class Grammar:
                 for b in self.__rules[a]:
                     if self.__start in b:
                         szero = self.__start + "0"
+                        self[szero] = {(self.__start,)}
                         self.__rules[szero] = {(self.__start,)}
                         self.__start = szero
                         return
@@ -254,34 +260,55 @@ class Grammar:
         self.remove_epsilon()
         self.remove_unused()
 
-    def first_set(self, r: str) -> Set[str]:
-        return self.__first_set(r, r, True)
+    def start(self) -> str:
+        return self.__start
 
-    def follow_set(self, r: str) -> Set[str]:
-        ret: Set[str] = set()
-        if r not in self:
-            return {"$"}
-        if r == self.__start:
-            ret.add("$")
-        for rule in self:
-            for production in self.__rules[rule]:
-                indexes = self.__indices(production, r)
-                for index in indexes:
-                    rem = list(production[index + 1:])
-                    cur = set()
-                    hit = False
-                    while len(rem) > 0:
-                        fs = self.first_set(rem[0])
-                        cur |= fs
-                        if "#" not in fs:
-                            hit = True
-                            break
-                        rem = rem[1:]
-                    if not hit:
-                        cur |= self.follow_set(rule)
-                    if "#" in cur:
-                        cur.remove("#")
-                    ret |= cur
+    def first_sets(self) -> Dict[str, Set[str]]:
+        return {x: self.__first_set(x, x, True) for x in self}
+
+    def follow_sets(self) -> Dict[str, Set[str]]:
+        ret: Dict[str, Set[str]] = {}
+        for nt in self:
+            if nt == self.__start:
+                ret[nt] = {"$"}
+            else:
+                ret[nt] = set()
+
+        fs: Dict[str, Set[str]] = self.first_sets()
+
+        while True:
+            tmp = deepcopy(ret)
+            for nt1 in self:
+                tm = set() if nt1 != self.__start else {"$"}
+                for nt2 in self:
+                    for prod in self[nt2]:
+                        if prod == ("#",):
+                            continue
+                        ind = self.__indices(prod, nt1)
+                        for i in ind:
+                            st: Set[str] = set()
+                            while i < len(prod) - 1:
+                                char = prod[i + 1]
+                                if char not in tmp:
+                                    st |= {char}
+                                    break
+
+                                s = fs[char]
+                                if "#" not in s:
+                                    st |= s
+                                    break
+
+                                st |= (fs[char] - {'#'})
+                                i = i + 1
+
+                            if i >= len(prod) - 1:
+                                st |= tmp[nt2]
+
+                            tm |= st
+                ret[nt1] = tm
+            if tmp == ret:
+                break
+
         return ret
 
     def __remove_dlr(self, rule: str):
@@ -310,7 +337,7 @@ class Grammar:
     def __contains__(self, rule: str):
         return rule in self.__rules
 
-    def __getitem__(self, rule: str):
+    def __getitem__(self, rule: str) -> Set[Tuple[str]]:
         return self.__rules[rule]
 
     def __iter__(self):
@@ -320,6 +347,9 @@ class Grammar:
 
     def __len__(self):
         return len(self.__rules)
+
+    def __setitem__(self, key: str, rule: Set[Tuple[str]]):
+        self.__rules[key] = rule
 
     def __str__(self):
         return reduce(lambda a, v: a + "\n" + v[0] + " -> " + reduce(lambda d, e: d + " | " + reduce(lambda b, c: b + " " + (c if c != "#" else "Ɛ"), e, "")[1:], v[1], "")[3:], [(x, self.__rules[x]) for x in self], "")[1:]
@@ -334,11 +364,13 @@ def main():
         "F -> ( E ) | id"])
     print(x)
     print()
-    for rule in x:
-        print(rule + ": " + str(x.first_set(rule)))
+    fs = x.first_sets()
+    for s in fs:
+        print(s + ": " + str(fs[s]))
     print()
-    for rule in x:
-        print(rule + ": " + str(x.follow_set(rule)))
+    os = x.follow_sets()
+    for s in os:
+        print(s + ": " + str(os[s]))
 
 
 if __name__ == '__main__':
