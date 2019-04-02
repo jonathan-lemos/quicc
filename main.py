@@ -12,7 +12,6 @@ class Grammar:
     __T = TypeVar("__T")
 
     """
-    Internal method. Do not use outside of class
     Computes the "epsilon power set" of all possibilities of a token being in a production.
     This is used for removing epsilons, hence the name.
     
@@ -24,7 +23,7 @@ class Grammar:
     @staticmethod
     def __epsilon_iter(l: Tuple[str], s: str) -> List[Tuple[str]]:
         # power set bit strings. length = occurences in S
-        # 0 represents "not in the set", 1 represents "in the set
+        # 0 represents "not in the set", 1 represents "in the set"
         bitstrings = ["".join(seq) for seq in itertools.product("01", repeat=l.count(s))]
         output = []
         for bs in bitstrings:
@@ -49,7 +48,6 @@ class Grammar:
         return output
 
     """
-    Internal method. Do not use outside of class
     Returns the indices where a particular element appears in a sequence
     
     Example: AbcAdeA would become (0, 3, 6)
@@ -66,7 +64,6 @@ class Grammar:
         return tuple(indices)
 
     """
-    Internal method. Do not use outside of class
     Returns the first index that matches a given lambda
     
     :param fn: The lambda to check. Returns true if iteration should stop.
@@ -81,7 +78,6 @@ class Grammar:
         return -1
 
     """
-    Internal method. Do not use outside of class
     Lexes a production's right hand side into a sequence of tokens.
     For example, 'A B cde "fgh ijk" r"[0-9]+"' turns into ['A', 'B', 'cde', '"fgh ijk"', 'r"[0-9]+"']
     
@@ -175,20 +171,44 @@ class Grammar:
 
         self.__start = cfg[0].split("->")[0].strip() if len(cfg) > 0 else ""
 
-    def __first_set(self, r: str, start: str, first: bool) -> Set[str]:
+    """
+    Returns all the productions in the given grammar.
+    
+    :returns: An iterable containing (nonterm, production)
+    """
+    def __prods(self) -> Iterable[Tuple[str, Tuple[str]]]:
+        return ((nt, prod) for nt in self for prod in self[nt])
+
+    """
+    Recursive method that returns the first set of a given production
+    Helper method for __first_set()
+    
+    :param r: (nonterm, production)
+    :param nt_found: A list of nonterminals that have been processed. Helps with left recursion
+    """
+    def __first_set_rec(self, r: Tuple[str, Tuple[str]], nt_found: Set[str]) -> Set[str]:
         ret: Set[str] = set()
-        if r == start and not first:
+        # if we've already been to this rule (left recursing)
+        if r[0] in nt_found:
+            # return an empty set, because production cannot start with this rule
             return set()
-        if r not in self:
-            return {r}
-        for rule in self.__rules[r]:
-            c = rule[0]
-            if c in self.__rules:
-                if c != r:
-                    ret = ret.union(self.__first_set(c, start, False))
-            else:
-                ret.add(c)
-        return ret
+        c: str = r[1][0]
+        # if the beginning of this rule is a terminal
+        if c not in self:
+            # return a set containing just that terminal
+            return {c}
+        # if the beginning of this rule is a nonterm
+        # for each production that the nonterm can produce, union that production's first set with ours, then return it
+        return reduce(lambda a, v: a | self.__first_set_rec((c, v), nt_found | {r[0]}), self[c], ret)
+
+    """
+    Computes the first set of a given production
+    
+    :param r: (nonterminal, production to match)
+    :returns: A set of terminals that can appear first in a given production
+    """
+    def __first_set(self, r: Tuple[str, Tuple[str]]) -> Set[str]:
+        return self.__first_set_rec(r, set())
 
     def __parse_rdp(self, tokens: Sequence[Tuple[str, str]], prod: Tuple[str], ind: int) -> Union[List[Union[Tuple[str, str], List]], None]:
         output: List[Union[Tuple[str, str], List]] = []
@@ -294,7 +314,7 @@ class Grammar:
         return self.__start
 
     def first_sets(self) -> Dict[str, Set[str]]:
-        return {x: self.__first_set(x, x, True) for x in self}
+        return {x: reduce(lambda a, c: a | self.__first_set((x, c)), self[x], set()) for x in self}
 
     def follow_sets(self) -> Dict[str, Set[str]]:
         ret: Dict[str, Set[str]] = {}
@@ -465,8 +485,6 @@ def main():
         "args -> arg-list | #",
         "arg-list -> arg-list , expression | expression",
     ])
-    x.fix()
-    print(str(x))
     print(x.lex([
         "int main(void) {",
         "   return 0;",
@@ -475,6 +493,12 @@ def main():
         "ID": re.compile("[A-Za-z]+"),
         "NUM": re.compile("\\d+|\\d\\.\\d+")
     }))
+    print()
+    print(str(x))
+    print()
+    fs = x.first_sets()
+    for v in fs:
+        print(v + " -> " + str(fs[v]))
 
 
 if __name__ == '__main__':
