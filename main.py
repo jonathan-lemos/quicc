@@ -100,12 +100,6 @@ class Grammar:
         last_ws = True
         for c in rhs + " ":
             if escape:
-                if c == "t":
-                    cur += "\t"
-                    continue
-                if c == "n":
-                    cur += "\n"
-                    continue
                 cur += c
                 escape = False
                 last_ws = False
@@ -196,6 +190,25 @@ class Grammar:
                 ret.add(c)
         return ret
 
+    def __parse_rdp(self, tokens: Sequence[Tuple[str, str]], prod: Tuple[str], ind: int) -> Union[List[Union[Tuple[str, str], List]], None]:
+        output: List[Union[Tuple[str, str], List]] = []
+
+        for t in prod:
+            n = tokens[ind]
+            ind = ind + 1
+            if n[1] in self:
+                a: Union[Tuple[str, str], List]
+                for prod in self[n[1]]:
+                    a = self.__parse_rdp(tokens, prod, ind)
+                    if a is not None:
+                        ind += len(a)
+                        break
+                if a is None:
+                    return None
+                output.append(a)
+
+        return output
+
     def remove_epsilon(self):
         def add_new_start():
             for a in self.__rules:
@@ -233,6 +246,8 @@ class Grammar:
             nt1: str = nt1
             for nt2 in rules_iter:
                 nt2: str = nt2
+                if nt1 == nt2:
+                    continue
                 cur_rules = deepcopy(self.__rules[nt1])
                 for rule in cur_rules:
                     rule: Tuple[str] = rule
@@ -326,39 +341,53 @@ class Grammar:
 
         return ret
 
-    def lex(self, ip: Iterable[str]) -> Sequence[Tuple[str, Union[Pattern[str], None]]]:
-        tokens: Set[Pattern[str]] = set()
-        for nt in self:
-            for prod in self[nt]:
-                for tok in prod:
-                    if tok not in self:
-                        if tok.startswith("r\""):
-                            tok = tok[2:-1]
-                            if not tok.startswith("^"):
-                                tok = "^" + tok
-                            tokens.add(re.compile(tok))
-                        else:
-                            if tok.startswith("\""):
-                                tok = tok[1:-1]
-                            tokens.add(re.compile("^" + re.escape(tok)))
+    def lex(self, ip: Iterable[str], spcl: Dict[str, Pattern[str]] = None) -> Sequence[Tuple[str, str]]:
+        if spcl is None:
+            spcl = {}
 
-        ret: List[Tuple[str, Union[Pattern[str], None]]] = []
+        tokens: Set[str] = {tok for nt in self for prod in self[nt] for tok in prod if tok not in self}
+
+        ret: List[Tuple[str, str]] = []
         for line in ip:
             line = line.strip()
             while line != "":
-                longest: Tuple[str, Union[re, None]] = ("", None)
-                for regex in tokens:
-                    m = re.match(regex, line)
-                    if m is not None:
-                        longest = (m[0], regex) if len(m[0]) > len(longest[0]) else longest
+                longest: Tuple[str, str] = ("", "")
+                for s in tokens:
+                    if line.startswith(s):
+                        longest = (s, s) if len(s) > len(longest[0]) else longest
+                for name in spcl:
+                    r = spcl[name].match(line, 0)
+                    if r is not None:
+                        longest = (r[0], name) if len(r[0]) > len(longest[0]) else longest
                 if longest[0] == "":
-                    ret.append((line[0], None))
-                    line = line[1:].strip()
-                else:
-                    ret.append(longest)
-                    line = line[len(longest[0]):].strip()
-
+                    longest = (line[0], "ERROR")
+                ret.append(longest)
+                line = line[len(longest[0]):].strip()
         return ret
+
+    # warning - extremely slow
+    def parse_rdp(self, tokens: Sequence[Tuple[str, str]]):
+        pass
+
+    def parse_ll1(self, tokens: Sequence[Tuple[str, str]]) -> Dict[str, Dict[str, Union[str, Tuple[str]]]]:
+        token_types: List[str] = list({typ for (_, typ) in tokens})
+        first_sets: Dict[str, Set[str]] = self.first_sets()
+        follow_sets: Dict[str, Set[str]] = self.follow_sets()
+        ll1_table: Dict[str, Dict[str, Union[str, Tuple[str]]]] = {}
+        for nt in self:
+            ll1_table[nt] = {}
+            for prod in self[nt]:
+                if prod == ("#",):
+                    f = follow_sets[nt]
+                    for sym in f:
+                        if sym in ll1_table[nt]:
+                            raise Exception("LL(1) table conflict " + nt + "(" + str(prod) + "," + ll1_table[nt][sym] + ")")
+                        ll1_table[nt][sym] = prod
+                elif prod[0] not in self:
+                    ll1_table[nt][prod[0]] = prod
+                else:
+                    ll1_table[nt][prod[0]] = prod[0]
+        return ll1_table
 
     def __remove_dlr(self, rule: str):
         new_rule = set()
@@ -432,14 +461,20 @@ def main():
         "term -> term mulop factor | factor",
         "mulop -> * | /",
         "factor -> ( expression ) | var | call | NUM",
-        'NUM -> "\\d+" | "\\d+\\.\\d+"',
-        'ID -> "[a-zA-Z]+"'
+        "call -> ID ( args )",
+        "args -> arg-list | #",
+        "arg-list -> arg-list , expression | expression",
     ])
+    x.fix()
+    print(str(x))
     print(x.lex([
         "int main(void) {",
         "   return 0;",
         "}"
-    ]))
+    ], {
+        "ID": re.compile("[A-Za-z]+"),
+        "NUM": re.compile("\\d+|\\d\\.\\d+")
+    }))
 
 
 if __name__ == '__main__':
