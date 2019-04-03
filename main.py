@@ -1,8 +1,9 @@
+from collections import deque
 from functools import reduce
 from copy import deepcopy
 import itertools
 import re
-from typing import Callable, Dict, Iterable, List, Pattern, Sequence, Set, Tuple, TypeVar, Union
+from typing import Callable, Deque, Dict, Iterable, List, Pattern, Sequence, Set, Tuple, TypeVar, Union
 
 
 class Grammar:
@@ -139,10 +140,14 @@ class Grammar:
     Any token in quotes preserves spaces
     A quote can be escaped with \"
     
+    The starting symbol is the first in the grammar.
+    
     :param cfg: A list of rules as described above
     :raise Exception: Error parsing cfg
     """
-    def __init__(self, cfg: Sequence[str] = ()):
+    def __init__(self, cfg: Iterable[str] = ()):
+        self.__start = ""
+
         for rule in cfg:
             # split name of rule and its right hand side
             a = [x.strip() for x in rule.split("->")]
@@ -150,6 +155,9 @@ class Grammar:
                 raise Exception("\"->\" not found in rule \"" + rule + "\"")
             if len(a) > 2:
                 raise Exception("Multiple \"->\" found in rule \"" + rule + "\"")
+
+            if self.__start == "":
+                self.__start = a[0]
 
             # split by "|"
             b = [x.strip() for x in a[1].split("|")]
@@ -169,8 +177,6 @@ class Grammar:
                 # add it to the list
                 self.__rules[a[0]].add(c)
 
-        self.__start = cfg[0].split("->")[0].strip() if len(cfg) > 0 else ""
-
     """
     Returns all the productions in the given grammar.
     
@@ -180,26 +186,17 @@ class Grammar:
         return ((nt, prod) for nt in self for prod in self[nt])
 
     """
-    Recursive method that returns the first set of a given production
-    Helper method for __first_set()
-    
-    :param r: (nonterm, production)
-    :param nt_found: A list of nonterminals that have been processed. Helps with left recursion
+    Returns all the productions that can appear at the beginning of a rule.
     """
-    def __first_set_rec(self, r: Tuple[str, Tuple[str]], nt_found: Set[str]) -> Set[str]:
-        ret: Set[str] = set()
-        # if we've already been to this rule (left recursing)
-        if r[0] in nt_found:
-            # return an empty set, because production cannot start with this rule
-            return set()
-        c: str = r[1][0]
-        # if the beginning of this rule is a terminal
-        if c not in self:
-            # return a set containing just that terminal
-            return {c}
-        # if the beginning of this rule is a nonterm
-        # for each production that the nonterm can produce, union that production's first set with ours, then return it
-        return reduce(lambda a, v: a | self.__first_set_rec((c, v), nt_found | {r[0]}), self[c], ret)
+    def __first_iter_rec(self, r: Tuple[str, Tuple[str]], nt_found: Set[str]) -> Iterable[Tuple[str, Tuple[str]]]:
+        if r[1][0] in nt_found:
+            return
+        yield r
+        if r[1][0] not in self:
+            return
+        else:
+            for prod in list(self[r[1][0]]):
+                yield from self.__first_iter_rec((r[1][0], prod), nt_found | {r[0]})
 
     """
     Computes the first set of a given production
@@ -208,7 +205,22 @@ class Grammar:
     :returns: A set of terminals that can appear first in a given production
     """
     def __first_set(self, r: Tuple[str, Tuple[str]]) -> Set[str]:
-        return self.__first_set_rec(r, set())
+        ret: Set[str] = set()
+        for prod in self.__first_iter_rec(r, set()):
+            if prod[1][0] not in self:
+                ret.add(prod[1][0])
+        return ret
+
+    def __left_factor(self):
+        for nt in self:
+            cur: Dict[str, int] = {}
+            for prod in self[nt]:
+                if prod[0] not in self:
+                    if prod[0] in cur:
+                        cur[prod[0]] += 1
+                    else:
+                        cur[prod[0]] = 1
+            newr = {x: y for (x, y) in cur.items() if y >= 2}
 
     def __parse_rdp(self, tokens: Sequence[Tuple[str, str]], prod: Tuple[str], ind: int) -> Union[List[Union[Tuple[str, str], List]], None]:
         output: List[Union[Tuple[str, str], List]] = []
@@ -229,18 +241,18 @@ class Grammar:
 
         return output
 
+    """
+    Removes epsilon productions from the grammar.
+    """
     def remove_epsilon(self):
-        def add_new_start():
-            for a in self.__rules:
-                for b in self.__rules[a]:
-                    if self.__start in b:
-                        szero = self.__start + "0"
-                        self[szero] = {(self.__start,)}
-                        self.__rules[szero] = {(self.__start,)}
-                        self.__start = szero
-                        return
+        # if the start rule appears in any production
+        if len(list(filter(lambda s: self.__start in s, [x[1] for x in self.__prods()]))) > 0:
+            # add a new start state that produces the current one
+            szero = self.__start + "0"
+            self[szero] = {(self.__start,)}
+            self.__rules[szero] = {(self.__start,)}
+            self.__start = szero
 
-        add_new_start()
         rules_iter = list(self.__rules)
         for _ in rules_iter:
             for nt1 in rules_iter:
@@ -260,6 +272,9 @@ class Grammar:
             if ("#",) in self.__rules[nt]:
                 self.__rules[nt].remove(("#",))
 
+    """
+    Removes any kind of left recursion from the grammar.
+    """
     def remove_recursion(self):
         rules_iter: Sequence[str] = list(self.__rules)
         for nt1 in rules_iter:
@@ -287,6 +302,9 @@ class Grammar:
                     newt = tuple([x for x in rule if x != "#"])
                     self.__rules[nt].add(newt)
 
+    """
+    Removes rules that cannot be reached from the grammar.
+    """
     def remove_unused(self):
         found = set()
         rem = {self.__start}
@@ -310,6 +328,9 @@ class Grammar:
         self.remove_epsilon()
         self.remove_unused()
 
+    """
+    Returns the start symbol of the given grammar.
+    """
     def start(self) -> str:
         return self.__start
 
