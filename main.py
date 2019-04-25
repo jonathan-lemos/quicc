@@ -1,14 +1,17 @@
-from collections import deque
 from functools import reduce
 from copy import deepcopy
 import itertools
 import re
-from typing import Callable, Deque, Dict, Iterable, List, Pattern, Sequence, Set, Tuple, TypeVar, Union
+from typing import Callable, Dict, Iterable, Iterator, List, Pattern, Sequence, Set, Tuple, TypeVar
 
 
 class Grammar:
     __rules: Dict[str, Set[Tuple[str]]] = {}
+    __terms: Set[str] = set()
+    __nonterms: Set[str] = set()
     __start: str = ""
+
+    __nt_list: List[str] = []
 
     __T = TypeVar("__T")
 
@@ -80,7 +83,7 @@ class Grammar:
 
     """
     Lexes a production's right hand side into a sequence of tokens.
-    For example, 'A B cde "fgh ijk" r"[0-9]+"' turns into ['A', 'B', 'cde', '"fgh ijk"', 'r"[0-9]+"']
+    For example, 'A B cde "fgh \\"\\\\ ijk"' turns into ['A', 'B', 'cde', 'fgh "\ ijk']
     
     Spaces in quotations are preserved.
     r"string" denotes a regex.
@@ -156,6 +159,8 @@ class Grammar:
             if len(a) > 2:
                 raise Exception("Multiple \"->\" found in rule \"" + rule + "\"")
 
+            self.__nt_list.append(a[0])
+
             if self.__start == "":
                 self.__start = a[0]
 
@@ -177,78 +182,33 @@ class Grammar:
                 # add it to the list
                 self.__rules[a[0]].add(c)
 
+        # get a set of terminals and nonterminals
+        self.__nonterms = set(self.__rules)
+        self.__terms = {token for nt in self.__rules for token in nt if token not in self.__nonterms}
+
     """
-    Returns all the productions in the given grammar.
+    Returns all of the non-terminals in the grammar.
+    The first nonterm is always the start symbol.
     
-    :returns: An iterable containing (nonterm, production)
+    :returns: All of the non-terminals in the grammar.
     """
-    def __prods(self) -> Iterable[Tuple[str, Tuple[str]]]:
-        return ((nt, prod) for nt in self for prod in self[nt])
-
-    """
-    Returns all the productions that can appear at the beginning of a rule.
-    """
-    def __first_iter_rec(self, r: Tuple[str, Tuple[str]], nt_found: Set[str]) -> Iterable[Tuple[str, Tuple[str]]]:
-        if r[1][0] in nt_found:
-            return
-        yield r
-        if r[1][0] not in self:
-            return
-        else:
-            for prod in list(self[r[1][0]]):
-                yield from self.__first_iter_rec((r[1][0], prod), nt_found | {r[0]})
+    def nonterms(self) -> Sequence[str]:
+        return self.__nt_list
 
     """
-    Computes the first set of a given production
-    
-    :param r: (nonterminal, production to match)
-    :returns: A set of terminals that can appear first in a given production
+    Returns all of the terminals in the grammar.
     """
-    def __first_set(self, r: Tuple[str, Tuple[str]]) -> Set[str]:
-        ret: Set[str] = set()
-        for prod in self.__first_iter_rec(r, set()):
-            if prod[1][0] not in self:
-                ret.add(prod[1][0])
-        return ret
-
-    def __left_factor(self):
-        for nt in self:
-            cur: Dict[str, int] = {}
-            for prod in self[nt]:
-                if prod[0] not in self:
-                    if prod[0] in cur:
-                        cur[prod[0]] += 1
-                    else:
-                        cur[prod[0]] = 1
-            newr = {x: y for (x, y) in cur.items() if y >= 2}
-
-    def __parse_rdp(self, tokens: Sequence[Tuple[str, str]], prod: Tuple[str], ind: int) -> Union[List[Union[Tuple[str, str], List]], None]:
-        output: List[Union[Tuple[str, str], List]] = []
-
-        for t in prod:
-            n = tokens[ind]
-            ind = ind + 1
-            if n[1] in self:
-                a: Union[Tuple[str, str], List]
-                for prod in self[n[1]]:
-                    a = self.__parse_rdp(tokens, prod, ind)
-                    if a is not None:
-                        ind += len(a)
-                        break
-                if a is None:
-                    return None
-                output.append(a)
-
-        return output
+    def terms(self) -> Iterable[str]:
+        return self.__terms
 
     """
     Removes epsilon productions from the grammar.
     """
     def remove_epsilon(self):
         # if the start rule appears in any production
-        if len(list(filter(lambda s: self.__start in s, [x[1] for x in self.__prods()]))) > 0:
+        if len(list(filter(lambda s: self.start() in s, [x[1] for x in self]))) > 0:
             # add a new start state that produces the current one
-            szero = self.__start + "0"
+            szero = self.start() + "0"
             self[szero] = {(self.__start,)}
             self.__rules[szero] = {(self.__start,)}
             self.__start = szero
@@ -334,53 +294,22 @@ class Grammar:
     def start(self) -> str:
         return self.__start
 
-    def first_sets(self) -> Dict[str, Set[str]]:
-        return {x: reduce(lambda a, c: a | self.__first_set((x, c)), self[x], set()) for x in self}
-
-    def follow_sets(self) -> Dict[str, Set[str]]:
-        ret: Dict[str, Set[str]] = {}
-        for nt in self:
-            if nt == self.__start:
-                ret[nt] = {"$"}
-            else:
-                ret[nt] = set()
-
-        fs: Dict[str, Set[str]] = self.first_sets()
+    def __first_follows(self):
+        first = {}
+        for nt in self.__nonterms:
+            first[nt] = set()
+        for t in self.__terms:
+            first[t] = {t}
+        follow = {nt: set() for nt in self.__nonterms}
+        epsilons = set()
 
         while True:
-            tmp = deepcopy(ret)
-            for nt1 in self:
-                tm = set() if nt1 != self.__start else {"$"}
-                for nt2 in self:
-                    for prod in self[nt2]:
-                        if prod == ("#",):
-                            continue
-                        ind = self.__indices(prod, nt1)
-                        for i in ind:
-                            st: Set[str] = set()
-                            while i < len(prod) - 1:
-                                char = prod[i + 1]
-                                if char not in tmp:
-                                    st |= {char}
-                                    break
+            updated = False
 
-                                s = fs[char]
-                                if "#" not in s:
-                                    st |= s
-                                    break
+            for nt in self.nonterms():
+                for rule in self.__rules[nt]:
 
-                                st |= (fs[char] - {'#'})
-                                i = i + 1
 
-                            if i >= len(prod) - 1:
-                                st |= tmp[nt2]
-
-                            tm |= st
-                ret[nt1] = tm
-            if tmp == ret:
-                break
-
-        return ret
 
     def lex(self, ip: Iterable[str], spcl: Dict[str, Pattern[str]] = None) -> Sequence[Tuple[str, str]]:
         if spcl is None:
@@ -406,36 +335,12 @@ class Grammar:
                 line = line[len(longest[0]):].strip()
         return ret
 
-    # warning - extremely slow
-    def parse_rdp(self, tokens: Sequence[Tuple[str, str]]):
-        pass
-
-    def parse_ll1(self, tokens: Sequence[Tuple[str, str]]) -> Dict[str, Dict[str, Union[str, Tuple[str]]]]:
-        token_types: List[str] = list({typ for (_, typ) in tokens})
-        first_sets: Dict[str, Set[str]] = self.first_sets()
-        follow_sets: Dict[str, Set[str]] = self.follow_sets()
-        ll1_table: Dict[str, Dict[str, Union[str, Tuple[str]]]] = {}
-        for nt in self:
-            ll1_table[nt] = {}
-            for prod in self[nt]:
-                if prod == ("#",):
-                    f = follow_sets[nt]
-                    for sym in f:
-                        if sym in ll1_table[nt]:
-                            raise Exception("LL(1) table conflict " + nt + "(" + str(prod) + "," + ll1_table[nt][sym] + ")")
-                        ll1_table[nt][sym] = prod
-                elif prod[0] not in self:
-                    ll1_table[nt][prod[0]] = prod
-                else:
-                    ll1_table[nt][prod[0]] = prod[0]
-        return ll1_table
-
     def __remove_dlr(self, rule: str):
         new_rule = set()
 
         def f(y): return y != rule
 
-        lrec: List[Tuple[List[str], List[str]]] = [(x[:self.__first(f, x)], x[self.__first(f, x):]) for x in self.__rules[rule] if self.__first(f, x) != -1 and self.__first(f, x) > 0]
+        lrec: List[Tuple[Tuple[str], Tuple[str]]] = [(x[:self.__first(f, x)], x[self.__first(f, x):]) for x in self.__rules[rule] if self.__first(f, x) != -1 and self.__first(f, x) > 0]
         notlrec: List[Tuple[str]] = [x for x in self.__rules[rule] if self.__first(f, x) == 0]
         ruleprime = rule + "'"
 
@@ -459,22 +364,44 @@ class Grammar:
     def __getitem__(self, rule: str) -> Set[Tuple[str]]:
         return self.__rules[rule]
 
-    def __iter__(self):
-        x = self.__start
-        y = [x for x in self.__rules if x != self.__start]
-        return iter([x] + y)
+    def __iter__(self) -> Iterator[str, Tuple[str]]:
+        x = [(nt, prod) for nt in self.__rules for prod in self.__rules[nt] if nt != self.start()]
+        y = [(self.start(), prod) for prod in self.__rules[self.start()]]
+
+        return iter(y + x)
 
     def __len__(self):
         return len(self.__rules)
 
-    def __setitem__(self, key: str, rule: Set[Tuple[str]]):
-        self.__rules[key] = rule
-
     def __str__(self):
-        return reduce(lambda a, v: a + "\n" + v[0] + " -> " + reduce(lambda d, e: d + " | " + reduce(lambda b, c: b + " " + (c if c != "#" else "Ɛ"), e, "")[1:], v[1], "")[3:], [(x, self.__rules[x]) for x in self], "")[1:]
+        return reduce(lambda a, v: a + "\n" + v[0] + " -> " + reduce(lambda d, e: d + " | " + reduce(lambda b, c: b + " " + c, e, "")[1:], v[1], "")[3:], [(x, self.__rules[x]) for x in self], "")[1:]
+
+
+class ParserLR1:
+    def __init__(self, g: Grammar):
+        self.__grammar = g
 
 
 def main():
+    x = Grammar([
+        "S -> H",
+        "H -> A B C",
+        "A -> C m | a g | #",
+        "B -> B a | #",
+        "C -> C p | p | A",
+    ])
+    print(str(x))
+    s1 = x.first_sets()
+    print("First sets")
+    print("----------")
+    for y in s1:
+        print(y + ": " + str(s1[y]))
+    fs = x.follow_sets()
+    print("Follow sets")
+    print("----------")
+    for y in fs:
+        print(y + ": " + str(fs[y]))
+    """
     x = Grammar([
         "program -> declaration-list",
         "declaration-list -> declaration-list declaration | declaration",
@@ -520,6 +447,7 @@ def main():
     fs = x.first_sets()
     for v in fs:
         print(v + " -> " + str(fs[v]))
+    """
 
 
 if __name__ == '__main__':
