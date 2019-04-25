@@ -5,6 +5,121 @@ import re
 from typing import Callable, Dict, Iterable, Iterator, List, Pattern, Sequence, Set, Tuple, TypeVar
 
 
+__T = TypeVar("__T")
+
+"""
+Returns the indices where a particular element appears in a sequence
+    
+Example: AbcAdeA would become (0, 3, 6)
+:param l: The sequence
+:param s: The token to get the indices of
+:returns: The indices
+"""
+def indices(l: Sequence[__T], s: __T) -> Tuple[int]:
+    ind = []
+    for i in range(len(l)):
+        if l[i] == s:
+            ind.append(i)
+    return tuple(ind)
+
+"""
+Returns the first index that matches a given lambda
+    
+:param fn: The lambda to check. Returns true if iteration should stop.
+:param c: A sequence to iterate over
+:returns: The index, or -1 if not found
+"""
+def first(fn: Callable[[__T], bool], c: Sequence[__T]) -> int:
+    for i in range(len(c)):
+        if fn(c[i]):
+            return i
+    return -1
+
+"""
+Computes the "epsilon power set" of all possibilities of a token being in a production.
+This is used for removing epsilons, hence the name.
+
+Example: AbcAdeA for A would become {'bcde', 'Abcde', 'bcAde', 'bcdeA', 'AbcAde', 'AbcdeA', 'bcAdeA', 'AbcAdeA'}
+:param l: The production to iterate
+:param s: The token to iterate over
+:returns: The "epsilon power set"
+"""
+def __epsilon_iter(l: Tuple[str], s: str) -> List[Tuple[str]]:
+    # power set bit strings. length = occurences in S
+    # 0 represents "not in the set", 1 represents "in the set"
+    bitstrings = ["".join(seq) for seq in itertools.product("01", repeat=l.count(s))]
+    output = []
+    for bs in bitstrings:
+        tmp = []
+        ctr = 0
+        # for each token in the production
+        for c in l:
+            # if the token is not our iterator, append it to tmp
+            if c != s:
+                tmp.append(c)
+            # otherwise only append it if the bitstring at this char is a 0
+            else:
+                if bs[ctr] == "1":
+                    tmp.append(c)
+                ctr += 1
+        # if there's nothing in our tmp, append epsilon
+        if len(tmp) == 0:
+            output.append(("#",))
+        # otherwise append tmp
+        else:
+            output.append(tuple(tmp))
+    return output
+
+"""
+Lexes a production's right hand side into a sequence of tokens.
+For example, 'A B cde "fgh \\"\\\\ ijk"' turns into ['A', 'B', 'cde', 'fgh "\ ijk']
+
+Spaces in quotations are preserved.
+r"string" denotes a regex.
+
+:param rhs: The string to lex
+:returns: The sequence of tokens
+"""
+def tokenize(rhs: str) -> Sequence[str]:
+    ret: List[str] = []
+    cur: str = ""
+    quote = False
+    escape = False
+    last_ws = True
+    for c in rhs + " ":
+        if escape:
+            cur += c
+            escape = False
+            last_ws = False
+            continue
+        if c == " ":
+            if not quote:
+                if cur.strip() != "":
+                    ret.append(cur)
+                cur = ""
+            else:
+                cur += c
+            last_ws = True
+            continue
+        if c == "\"":
+            if not quote and not last_ws:
+                raise Exception("Quotes can only appear as complete tokens")
+            quote = not quote
+            last_ws = False
+            continue
+        if c == "\\" and not quote:
+            escape = True
+            last_ws = False
+            continue
+        cur += c
+        last_ws = False
+    if quote:
+        raise Exception("Missing closing quote")
+    if escape:
+        raise Exception("Escape at end of string")
+    return ret
+
+
 class Grammar:
     __rules: Dict[str, Set[Tuple[str]]] = {}
     __terms: Set[str] = set()
@@ -12,124 +127,6 @@ class Grammar:
     __start: str = ""
 
     __nt_list: List[str] = []
-
-    __T = TypeVar("__T")
-
-    """
-    Computes the "epsilon power set" of all possibilities of a token being in a production.
-    This is used for removing epsilons, hence the name.
-    
-    Example: AbcAdeA for A would become {'bcde', 'Abcde', 'bcAde', 'bcdeA', 'AbcAde', 'AbcdeA', 'bcAdeA', 'AbcAdeA'}
-    :param l: The production to iterate
-    :param s: The token to iterate over
-    :returns: The "epsilon power set"
-    """
-    @staticmethod
-    def __epsilon_iter(l: Tuple[str], s: str) -> List[Tuple[str]]:
-        # power set bit strings. length = occurences in S
-        # 0 represents "not in the set", 1 represents "in the set"
-        bitstrings = ["".join(seq) for seq in itertools.product("01", repeat=l.count(s))]
-        output = []
-        for bs in bitstrings:
-            tmp = []
-            ctr = 0
-            # for each token in the production
-            for c in l:
-                # if the token is not our iterator, append it to tmp
-                if c != s:
-                    tmp.append(c)
-                # otherwise only append it if the bitstring at this char is a 0
-                else:
-                    if bs[ctr] == "1":
-                        tmp.append(c)
-                    ctr += 1
-            # if there's nothing in our tmp, append epsilon
-            if len(tmp) == 0:
-                output.append(("#",))
-            # otherwise append tmp
-            else:
-                output.append(tuple(tmp))
-        return output
-
-    """
-    Returns the indices where a particular element appears in a sequence
-    
-    Example: AbcAdeA would become (0, 3, 6)
-    :param l: The sequence
-    :param s: The token to get the indices of
-    :returns: The indices
-    """
-    @staticmethod
-    def __indices(l: Sequence[__T], s: __T) -> Tuple[int]:
-        indices = []
-        for i in range(len(l)):
-            if l[i] == s:
-                indices.append(i)
-        return tuple(indices)
-
-    """
-    Returns the first index that matches a given lambda
-    
-    :param fn: The lambda to check. Returns true if iteration should stop.
-    :param c: A sequence to iterate over
-    :returns: The index, or -1 if not found
-    """
-    @staticmethod
-    def __first(fn: Callable[[__T], bool], c: Sequence[__T]) -> int:
-        for i in range(len(c)):
-            if fn(c[i]):
-                return i
-        return -1
-
-    """
-    Lexes a production's right hand side into a sequence of tokens.
-    For example, 'A B cde "fgh \\"\\\\ ijk"' turns into ['A', 'B', 'cde', 'fgh "\ ijk']
-    
-    Spaces in quotations are preserved.
-    r"string" denotes a regex.
-    
-    :param rhs: The string to lex
-    :returns: The sequence of tokens
-    """
-    @staticmethod
-    def __lex_rhs(rhs: str) -> Sequence[str]:
-        ret: List[str] = []
-        cur: str = ""
-        quote = False
-        escape = False
-        last_ws = True
-        for c in rhs + " ":
-            if escape:
-                cur += c
-                escape = False
-                last_ws = False
-                continue
-            if c == " ":
-                if not quote:
-                    if cur.strip() != "":
-                        ret.append(cur)
-                    cur = ""
-                else:
-                    cur += c
-                last_ws = True
-                continue
-            if c == "\"":
-                if not quote and not last_ws:
-                    raise Exception("Quotes can only appear as complete tokens")
-                quote = not quote
-                last_ws = False
-                continue
-            if c == "\\" and not quote:
-                escape = True
-                last_ws = False
-                continue
-            cur += c
-            last_ws = False
-        if quote:
-            raise Exception("Missing closing quote")
-        if escape:
-            raise Exception("Escape at end of string")
-        return ret
 
     """
     Constructs a grammar out of a set of rules
@@ -175,7 +172,7 @@ class Grammar:
             # foreach rule in b,
             for r in b:
                 # get rid of epsilons unless epsilon is the only member of that rule
-                lex = self.__lex_rhs(r)
+                lex = tokenize(r)
                 c = tuple(x for x in lex if len(lex) == 1 or x != "#")
                 if len(c) == 0:
                     raise Exception("Cannot have empty rules in CFG rule \"" + r + "\"")
