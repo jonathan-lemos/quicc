@@ -5,6 +5,10 @@ import re
 from typing import Callable, Dict, Iterable, Iterator, List, Pattern, Sequence, Set, Tuple, TypeVar
 
 
+class CFGException(Exception):
+    pass
+
+
 __T = TypeVar("__T")
 
 """
@@ -44,7 +48,7 @@ Example: AbcAdeA for A would become {'bcde', 'Abcde', 'bcAde', 'bcdeA', 'AbcAde'
 :param s: The token to iterate over
 :returns: The "epsilon power set"
 """
-def __epsilon_iter(l: Tuple[str], s: str) -> List[Tuple[str]]:
+def epsilon_iter(l: Tuple[str], s: str) -> List[Tuple[str]]:
     # power set bit strings. length = occurences in S
     # 0 represents "not in the set", 1 represents "in the set"
     bitstrings = ["".join(seq) for seq in itertools.product("01", repeat=l.count(s))]
@@ -120,10 +124,35 @@ def tokenize(rhs: str) -> Sequence[str]:
     return ret
 
 
+class Nonterm:
+    __symbol: str = ""
+    __productions: Set[Tuple[str]]
+
+    def __init__(self, nt: str, *rhs: str):
+        if len(rhs) == 0:
+            raise CFGException("A Nonterm needs to be produced out of at least one string")
+
+        self.__symbol = nt
+
+        for st in rhs:
+            self.__productions = {tokenize(x) for x in st.split("|")}
+
+    def symbol(self):
+        return self.__symbol
+
+    def __iter__(self) -> Iterator[Tuple[str]]:
+        return iter(self.__productions)
+
+    def __str__(self) -> str:
+        def p2s(prod: Tuple[str]) -> str:
+            return reduce(lambda a, b: a + " " + b, prod)
+
+        return self.__symbol + " -> " + reduce(lambda a, b: a + " | " + p2s(b), self.__productions, "")[:3]
+
+
 class Grammar:
-    __rules: Dict[str, Set[Tuple[str]]] = {}
-    __terms: Set[str] = set()
-    __nonterms: Set[str] = set()
+    __rules: Dict[str, Nonterm] = {}
+    __terminals: Set[str] = set()
     __start: str = ""
 
     __nt_list: List[str] = []
@@ -148,6 +177,8 @@ class Grammar:
     def __init__(self, cfg: Iterable[str] = ()):
         self.__start = ""
 
+        vals: Dict[str, List[str]] = {}
+
         for rule in cfg:
             # split name of rule and its right hand side
             a = [x.strip() for x in rule.split("->")]
@@ -156,32 +187,15 @@ class Grammar:
             if len(a) > 2:
                 raise Exception("Multiple \"->\" found in rule \"" + rule + "\"")
 
-            self.__nt_list.append(a[0])
+            sym, rhs = a
 
-            if self.__start == "":
-                self.__start = a[0]
+            if sym not in vals:
+                vals[sym] = [rhs]
+            else:
+                vals[sym].append(rhs)
 
-            # split by "|"
-            b = [x.strip() for x in a[1].split("|")]
-            if len(b) == 0:
-                raise Exception("Cannot have empty right hand in CFG")
+        self.__rules = {nt: Nonterm(nt, *vals[nt]) for nt in vals}
 
-            if not a[0] in self.__rules:
-                self.__rules[a[0]] = set()
-
-            # foreach rule in b,
-            for r in b:
-                # get rid of epsilons unless epsilon is the only member of that rule
-                lex = tokenize(r)
-                c = tuple(x for x in lex if len(lex) == 1 or x != "#")
-                if len(c) == 0:
-                    raise Exception("Cannot have empty rules in CFG rule \"" + r + "\"")
-                # add it to the list
-                self.__rules[a[0]].add(c)
-
-        # get a set of terminals and nonterminals
-        self.__nonterms = set(self.__rules)
-        self.__terms = {token for nt in self.__rules for token in nt if token not in self.__nonterms}
 
     """
     Returns all of the non-terminals in the grammar.
@@ -220,7 +234,7 @@ class Grammar:
                     nt2: str = nt2
                     eps = filter(lambda x: x[1] > 0, [(x, x.count(nt1)) for x in self.__rules[nt2]])
                     for rule in eps:
-                        new = self.__epsilon_iter(rule[0], nt1)
+                        new = self.epsilon_iter(rule[0], nt1)
                         for x in new:
                             self.__rules[nt2].add(x)
         for nt in rules_iter:
