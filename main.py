@@ -1,7 +1,5 @@
 from functools import reduce
-from copy import deepcopy
 import itertools
-import re
 from typing import Callable, Dict, Iterable, Iterator, List, Pattern, Sequence, Set, Tuple, TypeVar
 
 
@@ -84,7 +82,7 @@ r"string" denotes a regex.
 :param rhs: The string to lex
 :returns: The sequence of tokens
 """
-def tokenize(rhs: str) -> Sequence[str]:
+def tokenize(rhs: str) -> Tuple[str]:
     ret: List[str] = []
     cur: str = ""
     quote = False
@@ -121,7 +119,10 @@ def tokenize(rhs: str) -> Sequence[str]:
         raise Exception("Missing closing quote")
     if escape:
         raise Exception("Escape at end of string")
-    return ret
+    if len(ret) != 1:
+        return tuple(filter(lambda x: x != "#", ret))
+    else:
+        return tuple(ret)
 
 
 class Nonterm:
@@ -147,15 +148,13 @@ class Nonterm:
         def p2s(prod: Tuple[str]) -> str:
             return reduce(lambda a, b: a + " " + b, prod)
 
-        return self.__symbol + " -> " + reduce(lambda a, b: a + " | " + p2s(b), self.__productions, "")[:3]
+        return self.__symbol + " -> " + reduce(lambda a, b: a + " | " + p2s(b), self.__productions, "")[3:]
 
 
 class Grammar:
     __rules: Dict[str, Nonterm] = {}
     __terminals: Set[str] = set()
     __start: str = ""
-
-    __nt_list: List[str] = []
 
     """
     Constructs a grammar out of a set of rules
@@ -189,6 +188,9 @@ class Grammar:
 
             sym, rhs = a
 
+            if self.__start == "":
+                self.__start = sym
+
             if sym not in vals:
                 vals[sym] = [rhs]
             else:
@@ -196,6 +198,13 @@ class Grammar:
 
         self.__rules = {nt: Nonterm(nt, *vals[nt]) for nt in vals}
 
+        self.__terminals = {x for _, prod in self for x in prod if x not in self.nonterms()}
+
+    """
+    Returns the start symbol of the grammar
+    """
+    def start(self) -> str:
+        return self.__start
 
     """
     Returns all of the non-terminals in the grammar.
@@ -204,136 +213,87 @@ class Grammar:
     :returns: All of the non-terminals in the grammar.
     """
     def nonterms(self) -> Sequence[str]:
-        return self.__nt_list
+        return [self.start()] + list(set(self.__rules) - {self.start()})
 
     """
     Returns all of the terminals in the grammar.
     """
-    def terms(self) -> Iterable[str]:
-        return self.__terms
+    def terminals(self) -> Iterable[str]:
+        return self.__terminals
 
-    """
-    Removes epsilon productions from the grammar.
-    """
-    def remove_epsilon(self):
-        # if the start rule appears in any production
-        if len(list(filter(lambda s: self.start() in s, [x[1] for x in self]))) > 0:
-            # add a new start state that produces the current one
-            szero = self.start() + "0"
-            self[szero] = {(self.__start,)}
-            self.__rules[szero] = {(self.__start,)}
-            self.__start = szero
+    def epsilon_nonterms(self) -> Set[str]:
+        ret = {"#"}
 
-        rules_iter = list(self.__rules)
-        for _ in rules_iter:
-            for nt1 in rules_iter:
-                nt1: str = nt1
-                if len([x for x in self.__rules[nt1] if x == ('#',)]) == 0:
-                    continue
-                for nt2 in rules_iter:
-                    nt2: str = nt2
-                    eps = filter(lambda x: x[1] > 0, [(x, x.count(nt1)) for x in self.__rules[nt2]])
-                    for rule in eps:
-                        new = self.epsilon_iter(rule[0], nt1)
-                        for x in new:
-                            self.__rules[nt2].add(x)
-        for nt in rules_iter:
-            if nt == self.__start:
-                continue
-            if ("#",) in self.__rules[nt]:
-                self.__rules[nt].remove(("#",))
+        while True:
+            len_tmp = len(ret)
+            for nt, prod in self:
+                hit = False
+                for token in prod:
+                    if token not in prod:
+                        hit = True
+                        break
+                if not hit:
+                    ret |= {nt}
+            if len_tmp == len(ret):
+                return ret
 
-    """
-    Removes any kind of left recursion from the grammar.
-    """
-    def remove_recursion(self):
-        rules_iter: Sequence[str] = list(self.__rules)
-        for nt1 in rules_iter:
-            nt1: str = nt1
-            for nt2 in rules_iter:
-                nt2: str = nt2
-                if nt1 == nt2:
-                    continue
-                cur_rules = deepcopy(self.__rules[nt1])
-                for rule in cur_rules:
-                    rule: Tuple[str] = rule
-                    index = self.__first(lambda x: x != nt2, rule)
-                    if index == -1:
-                        index = len(rule)
-                    if index > 0:
-                        self.__rules[nt1].remove(rule)
-                        for r in self.__rules[nt2]:
-                            self.__rules[nt1].add(tuple((list(r) * index) + list(rule[index:])))
-            self.__remove_dlr(nt1)
-        for nt in rules_iter:
-            rules = deepcopy(self.__rules[nt])
-            for rule in rules:
-                if '#' in rule and len(rule) > 1:
-                    self.__rules[nt].remove(rule)
-                    newt = tuple([x for x in rule if x != "#"])
-                    self.__rules[nt].add(newt)
+    def first_sets(self) -> Dict[str, Set[str]]:
+        ret = {}
+        for nt in self.nonterms():
+            ret[nt] = set()
+        for t in self.terminals():
+            ret[t] = {t}
+        epsilons = self.epsilon_nonterms()
 
-    """
-    Removes rules that cannot be reached from the grammar.
-    """
-    def remove_unused(self):
-        found = set()
-        rem = {self.__start}
-        while len(rem) > 0:
-            n = rem.pop()
-            if n in found:
-                continue
-            found.add(n)
-            if n not in self.__rules:
-                continue
-            for rule in self.__rules[n]:
-                for c in rule:
-                    rem.add(c)
-        for nt in list(self.__rules):
-            if nt not in found:
-                self.__rules.pop(nt)
+        while True:
+            updated = False
+            for nt, prod in self:
+                for token in prod:
+                    tmp = len(ret[nt])
+                    ret[nt] |= ret[token]
+                    updated |= len(ret[nt]) != tmp
+                    if token not in epsilons:
+                        break
+            if not updated:
+                return ret
 
-    def fix(self):
-        self.remove_recursion()
-        self.remove_unused()
-        self.remove_epsilon()
-        self.remove_unused()
-
-    """
-    Returns the start symbol of the given grammar.
-    """
-    def start(self) -> str:
-        return self.__start
-
-    def __first_follows(self):
-        first = {}
-        for nt in self.__nonterms:
-            first[nt] = set()
-        for t in self.__terms:
-            first[t] = {t}
-        follow = {nt: set() for nt in self.__nonterms}
-        epsilons = set()
+    def follow_sets(self) -> Dict[str, Set[str]]:
+        fs = self.first_sets()
+        epsilons = self.epsilon_nonterms()
+        ret = {}
+        for nt in self.nonterms():
+            ret[nt] = set()
 
         while True:
             updated = False
 
-            for nt in self.nonterms():
-                for rule in self.__rules[nt]:
+            def update(s1: Set[str], s2: Set[str]) -> None:
+                global updated
+                tmp = len(s1)
+                s1 |= s2
+                updated = len(s1) == tmp
 
-
+            for nt, prod in self:
+                for token in reversed(prod):
+                    if token in ret:
+                        update(ret[token], ret[nt])
+                        if token in epsilons:
+                            update(ret[nt], ret[token])
+                        else:
+                            update(ret[nt], fs[token])
+            if not updated:
+                return ret
 
     def lex(self, ip: Iterable[str], spcl: Dict[str, Pattern[str]] = None) -> Sequence[Tuple[str, str]]:
         if spcl is None:
             spcl = {}
-
-        tokens: Set[str] = {tok for nt in self for prod in self[nt] for tok in prod if tok not in self}
 
         ret: List[Tuple[str, str]] = []
         for line in ip:
             line = line.strip()
             while line != "":
                 longest: Tuple[str, str] = ("", "")
-                for s in tokens:
+                for s in self.terminals():
                     if line.startswith(s):
                         longest = (s, s) if len(s) > len(longest[0]) else longest
                 for name in spcl:
@@ -341,56 +301,27 @@ class Grammar:
                     if r is not None:
                         longest = (r[0], name) if len(r[0]) > len(longest[0]) else longest
                 if longest[0] == "":
-                    longest = (line[0], "ERROR")
+                    raise CFGException("Invalid token starting with \"" + line + "\"")
                 ret.append(longest)
                 line = line[len(longest[0]):].strip()
         return ret
 
-    def __remove_dlr(self, rule: str):
-        new_rule = set()
+    def __contains__(self, nt: str) -> bool:
+        return nt in self.__rules
 
-        def f(y): return y != rule
+    def __getitem__(self, nt: str) -> Nonterm:
+        return self.__rules[nt]
 
-        lrec: List[Tuple[Tuple[str], Tuple[str]]] = [(x[:self.__first(f, x)], x[self.__first(f, x):]) for x in self.__rules[rule] if self.__first(f, x) != -1 and self.__first(f, x) > 0]
-        notlrec: List[Tuple[str]] = [x for x in self.__rules[rule] if self.__first(f, x) == 0]
-        ruleprime = rule + "'"
+    def __iter__(self) -> Iterator[Tuple[str, Tuple[str]]]:
+        for nt in self.nonterms():
+            for prod in self[nt]:
+                yield (nt, prod)
 
-        if len(lrec) == 0:
-            return
-
-        for n in notlrec:
-            new_rule.add(tuple(list(n) + [ruleprime]))
-
-        new_rule_prime = {("#",)}
-
-        for a, b in lrec:
-            new_rule_prime.add(tuple(list(a)[1:] + list(b) + [ruleprime]))
-
-        self.__rules[rule] = new_rule
-        self.__rules[ruleprime] = new_rule_prime
-
-    def __contains__(self, rule: str):
-        return rule in self.__rules
-
-    def __getitem__(self, rule: str) -> Set[Tuple[str]]:
-        return self.__rules[rule]
-
-    def __iter__(self) -> Iterator[str, Tuple[str]]:
-        x = [(nt, prod) for nt in self.__rules for prod in self.__rules[nt] if nt != self.start()]
-        y = [(self.start(), prod) for prod in self.__rules[self.start()]]
-
-        return iter(y + x)
-
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.__rules)
 
-    def __str__(self):
-        return reduce(lambda a, v: a + "\n" + v[0] + " -> " + reduce(lambda d, e: d + " | " + reduce(lambda b, c: b + " " + c, e, "")[1:], v[1], "")[3:], [(x, self.__rules[x]) for x in self], "")[1:]
-
-
-class ParserLR1:
-    def __init__(self, g: Grammar):
-        self.__grammar = g
+    def __str__(self) -> str:
+        return reduce(lambda a, v: a + "\n" + str(v), [self[nt] for nt in self.nonterms()], "")[1:]
 
 
 def main():
