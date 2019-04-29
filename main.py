@@ -1,7 +1,8 @@
 from functools import reduce
+from collections import deque
 import itertools
 import re
-from typing import Callable, Dict, Iterable, Iterator, List, Pattern, Sequence, Set, Tuple, TypeVar
+from typing import Callable, Deque, Dict, Iterable, Iterator, List, Sequence, Set, Tuple, TypeVar
 
 
 class CFGException(Exception):
@@ -124,6 +125,7 @@ def tokenize(rhs: str) -> Tuple[str]:
         return tuple(filter(lambda x: x != "#", ret))
     else:
         return tuple(ret)
+
 
 class Nonterm:
     __symbol: str = ""
@@ -411,11 +413,42 @@ class Grammar:
         return reduce(lambda a, v: a + "\n" + str(v), [self[nt] for nt in self.nonterms()], "")[1:]
 
 
-class ItemSet:
+class Item:
     __nt: str
     __prod: Tuple[str]
     __follow: Set[str]
     __dotpos: int
+
+    def nt(self):
+        return self.__nt
+
+    def prod(self):
+        return self.__prod
+
+    def follow(self):
+        return self.__follow
+
+    def dotpos(self):
+        return self.__dotpos
+
+    def is_reduce(self):
+        return self.__dotpos >= len(self.__prod)
+
+    def closure(self, grammar: Grammar) -> Set["Item"]:
+        ret: Set["Item"] = set()
+        q: Deque["Item"] = deque([self])
+        nonterms = set(grammar.nonterms())
+        terms = set(grammar.terminals())
+
+        while len(q) > 0:
+            n = q.popleft()
+            ret.add(n)
+            sym = n.prod()[0]
+            if sym in terms:
+                for prod in grammar[sym]:
+                    q.append(Item(sym, prod, self.follow))
+        return ret
+
 
     def __init__(self, nt: str, prod: Tuple[str], follow: Set[str], dotpos: int):
         self.__nt = nt
@@ -428,19 +461,16 @@ class ItemSet:
 
 
 class LR1Parser:
-    __itemsets: List[Tuple[Tuple[str], str]]
+    __itemsets: List[Item]
 
     def __init__(self, g: Grammar):
-
+        pass
 
 
 def main():
     x = Grammar([
-        "S -> H",
-        "H -> A B C",
-        "A -> C m | a g | #",
-        "B -> B a | #",
-        "C -> C p | p | A",
+        "S -> C C",
+        "C -> e C | d"
     ])
     print(str(x))
     s1 = x.first_sets()
