@@ -10,8 +10,18 @@ def lookahead(prod: Tuple[str], dotpos: int, grammar: Grammar) -> Set[str]:
     epsilons = grammar.epsilon_nonterms()
     index = dotpos + 1
     ret = set()
+    stk = deque(prod)
 
-    for i in range(index, len(prod)):
+    while len(stk) > 0:
+        cur = stk.popleft()
+        hit = False
+        for token in prod[dotpos:]:
+            ret.add(token)
+            if token in epsilons:
+                hit = True
+                break
+        if not hit:
+            ret.add("#")
 
 
 

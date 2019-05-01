@@ -1,6 +1,6 @@
 from functools import reduce
 import re
-from typing import Dict, Iterable, Iterator, List, Sequence, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Sequence, Set, Tuple, Union
 
 
 class CFGException(Exception):
@@ -105,7 +105,7 @@ class Grammar:
     :param cfg: A list of rules as described above
     :raise Exception: Error parsing cfg
     """
-    def __init__(self, cfg: Iterable[str]):
+    def __init_iter_str(self, cfg: Iterable[str]):
         self.__start = ""
 
         vals: Dict[str, List[str]] = {}
@@ -131,6 +131,27 @@ class Grammar:
         self.__rules = {nt: Nonterm(nt, *vals[nt]) for nt in vals}
 
         self.__terminals = {x for _, prod in self for x in prod if x not in self.nonterms()}
+
+    def __init_tuple(self, cfg: Iterable[Tuple[str, Sequence[str]]]):
+        vals: Dict[str, List[Sequence[str]]] = {}
+
+        for nt, prod in cfg:
+            if nt not in vals:
+                vals[nt] = [prod]
+            else:
+                vals[nt].append(prod)
+
+        self.__rules = {nt: Nonterm(nt, *vals[nt]) for nt in vals}
+
+        self.__terminals = {x for _, prod in self for x in prod if x not in self.nonterms()}
+
+    def __init__(self, cfg: Union[Iterable[str], Iterable[Tuple[str, Sequence[str]]]]):
+        tmp = list(cfg)
+        if isinstance(tmp[0], str):
+            self.__init_iter_str(tmp)
+        else:
+            self.__init_tuple(tmp)
+
 
     """
     Returns the start symbol of the grammar
