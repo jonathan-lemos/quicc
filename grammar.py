@@ -348,7 +348,7 @@ class Grammar:
     """
     Iterates producing (nonterm, rule) for each rule in each nonterm.
     """
-    def __iter__(self) -> Iterator[Tuple[str, Tuple[str]]]:
+    def __iter__(self) -> Iterator[Tuple[str, Sequence[str]]]:
         for nt in self.nonterms():
             for prod in self[nt]:
                 yield (nt, prod)

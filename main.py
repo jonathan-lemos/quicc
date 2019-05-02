@@ -1,29 +1,39 @@
 from grammar import Grammar
 from collections import deque
-from typing import Deque, List, Set, Tuple
+from typing import Deque, List, Set, Tuple, Sequence
 
 
-def lookahead(prod: Tuple[str], dotpos: int, grammar: Grammar) -> Set[str]:
+def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
     if dotpos >= (len(prod) - 1):
         return {"$$"}
 
     epsilons = grammar.epsilon_nonterms()
-    index = dotpos + 1
+    nonterms = grammar.nonterms()
     ret = set()
-    stk = deque(prod)
+    nthit = set()
+    stk = deque()
+    stk.append(prod[dotpos + 1:])
 
     while len(stk) > 0:
         cur = stk.popleft()
         hit = False
-        for token in prod[dotpos:]:
-            ret.add(token)
-            if token in epsilons:
+        for token in cur:
+            if token in nonterms:
+                if token in nthit:
+                    hit = True
+                    break
+                else:
+                    nthit.add(token)
+                    for nt, p in filter(lambda x: x[0] == token, grammar):
+                        stk.append(p)
+            else:
+                ret.add(token)
+            if token not in epsilons:
                 hit = True
                 break
         if not hit:
-            ret.add("#")
-
-
+            ret.add("$$")
+    return ret
 
 
 class Item:
@@ -81,9 +91,13 @@ class LR1Parser:
 
 def main():
     x = Grammar([
+        "S' -> S",
         "S -> C C",
         "C -> e C | d"
     ])
+
+    a = lookahead(("C", "C"), 0, x)
+
     print(str(x))
     s1 = x.first_sets()
     print("First sets")
