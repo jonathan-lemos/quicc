@@ -117,6 +117,7 @@ class ItemSet:
         self.__items = base
         self.__shift = {}
         self.__reduce = {}
+        base_so_far[base] = self
         for item in base:
             if item.is_reduce():
                 for char in item.follow():
@@ -135,8 +136,7 @@ class ItemSet:
                 if tmp in base_so_far:
                     self.__shift[char] = base_so_far[tmp]
                 else:
-                    base_so_far[tmp] = ItemSet(item.advanced().closure(grammar), grammar, base_so_far)
-                    self.__shift[char] = base_so_far[tmp]
+                    self.__shift[char] = ItemSet(item.advanced().closure(grammar), grammar, base_so_far)
 
     def __iter__(self) -> Iterator[Item]:
         return iter(self.__items)
