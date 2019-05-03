@@ -82,7 +82,7 @@ class Item:
             sym = n.current()
             if sym in nonterms:
                 for prod in grammar[sym]:
-                    lh = lookahead(prod, 0, grammar)
+                    lh = lookahead(prod, n.dotpos(), grammar)
                     if "$$" in lh:
                         lh -= {"$$"}
                         lh |= parent_follows[n.prod()]
@@ -141,6 +141,26 @@ class ItemSet:
     def __iter__(self) -> Iterator[Item]:
         return iter(self.__items)
 
+    def __str__(self) -> str:
+        hit: Set[Sequence[Item]] = set()
+        q: Deque["ItemSet"] = deque([self])
+        s = ""
+        ctr = 0
+
+        while len(q) > 0:
+            cur = q.popleft()
+            s += str(ctr) + ":\n" + "\n".join(str(x) for x in cur.__items) + "\n\n"
+            ctr += 1
+            for itemset in self.__shift.values():
+                if itemset.__items not in hit:
+                    hit.add(itemset.__items)
+                    q.append(itemset)
+            for sym, follow in self.__reduce.items():
+                pass
+
+        return s.strip()
+
+
 
 class LR1Parser:
     __base: ItemSet
@@ -151,7 +171,12 @@ class LR1Parser:
         new_start_rule = new_start + " -> " + old_start
         g = Grammar([new_start_rule] + str(grammar).split("\n"))
         start_item = Item(new_start, (old_start,), {"$"}, 0)
+        # b = Item("C", ("e", "C"), {"$"}, 1)
+        # c = b.closure(g)
         self.__base = ItemSet(start_item.closure(g), g, {})
+
+    def __str__(self) -> str:
+        return str(self.__base)
 
 
 def main():
@@ -161,6 +186,7 @@ def main():
     ])
 
     a = LR1Parser(x)
+    print(str(a))
 
     print(str(x))
     s1 = x.first_sets()
