@@ -7,6 +7,10 @@ class ItemException(Exception):
     pass
 
 
+class ParseException(Exception):
+    pass
+
+
 def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
     if dotpos >= (len(prod) - 1):
         return {"$$"}
@@ -141,39 +145,75 @@ class ItemSet:
     def __iter__(self) -> Iterator[Item]:
         return iter(self.__items)
 
+    def __hash__(self):
+        return hash(self.__items) + hash(self.__shift.values()) + hash(self.__reduce.values())
+
     def __str__(self) -> str:
-        hit: Set[Sequence[Item]] = set()
+        ilist: List["ItemSet"] = [self]
+        idict: Dict["ItemSet", int] = {self: 0}
         q: Deque["ItemSet"] = deque([self])
-        s = ""
-        ctr = 0
 
         while len(q) > 0:
             cur = q.popleft()
-            s += str(ctr) + ":\n" + "\n".join(str(x) for x in cur.__items) + "\n\n"
-            ctr += 1
-            for itemset in self.__shift.values():
-                if itemset.__items not in hit:
-                    hit.add(itemset.__items)
+            for itemset in cur.__shift.values():
+                if itemset not in idict:
+                    idict[itemset] = len(ilist)
+                    ilist.append(itemset)
                     q.append(itemset)
-            for sym, follow in self.__reduce.items():
-                pass
 
+        def item2string(x: Item, shift: Dict[str, "ItemSet"], idict: Dict["ItemSet", int]):
+            if x.is_reduce():
+                return str(x) + " (R)"
+            else:
+                return str(x) + " (S" + str(idict[shift[x.current()]]) + ")"
+
+
+        s = ""
+        for i, itemset in enumerate(ilist):
+            s += str(i) + ":\n"
+            s += "\n".join(item2string(x, itemset.__shift, idict) for x in itemset.__items) + "\n\n"
         return s.strip()
+
+
+class ASTNode:
+    __rule: str
+    __children: Sequence[Union[Tuple[str, str], "ASTNode"]]
+
+    def __init__(self, rule: str, children: Sequence[Union[Tuple[str, str], "ASTNode"]]):
+        self.__rule = rule
+        self.__children = children
+
+    def rule(self) -> str:
+        return self.__rule
+
+    def __iter__(self) -> Iterator[Union[Tuple[str, str], "ASTNode"]]:
+        return iter(self.__children)
 
 
 
 class LR1Parser:
     __base: ItemSet
+    __grammar: Grammar
 
     def __init__(self, grammar: Grammar):
+        self.__grammar = grammar
         old_start = grammar.start()
         new_start = old_start + "'"
         new_start_rule = new_start + " -> " + old_start
         g = Grammar([new_start_rule] + str(grammar).split("\n"))
         start_item = Item(new_start, (old_start,), {"$"}, 0)
-        # b = Item("C", ("e", "C"), {"$"}, 1)
-        # c = b.closure(g)
         self.__base = ItemSet(start_item.closure(g), g, {})
+
+    def parse(self, arg: Union[str, Sequence[Tuple[str, str]]]):
+        if isinstance(arg, str):
+            arg = self.__grammar.lex(arg)
+        arg: Sequence[Tuple[str, str]] = arg
+
+        triples = [(x[0], x[1], y[0]) for x, y in zip(arg, list(arg[1:]) + [("$", "$")])]
+
+        stack: Deque[str] = deque(["$", "0"])
+        for token, raw, follow in triples:
+            pass
 
     def __str__(self) -> str:
         return str(self.__base)
@@ -182,23 +222,10 @@ class LR1Parser:
 def main():
     x = Grammar([
         "S -> C C",
-        "C -> e C | d"
+        "C -> e C | d",
     ])
-
-    a = LR1Parser(x)
-    print(str(a))
-
-    print(str(x))
-    s1 = x.first_sets()
-    print("First sets")
-    print("----------")
-    for y in s1:
-        print(y + ": " + str(s1[y]))
-    fs = x.follow_sets()
-    print("Follow sets")
-    print("----------")
-    for y in fs:
-        print(y + ": " + str(fs[y]))
+    y = LR1Parser(x)
+    z = 2 + 2
     """
     x = Grammar([
         "program -> declaration-list",
@@ -239,12 +266,6 @@ def main():
         "ID": "[A-Za-z]+",
         "NUM": "\\d+|\\d\\.\\d+"
     }))
-    print()
-    print(str(x))
-    print()
-    fs = x.first_sets()
-    for v in fs:
-        print(v + " -> " + str(fs[v]))
     """
 
 

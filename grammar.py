@@ -146,10 +146,12 @@ class Grammar:
         self.__terminals = {x for _, prod in self for x in prod if x not in self.nonterms()}
 
     def __init__(self, cfg: Union[Iterable[str], Iterable[Tuple[str, Sequence[str]]]]):
-        tmp = list(cfg)
+        tmp: Union[List[str], List[Tuple[str, Sequence[str]]]] = list(cfg)
         if isinstance(tmp[0], str):
+            tmp: List[str] = tmp
             self.__init_iter_str(tmp)
         else:
+            tmp: List[Tuple[str, Sequence[str]]] = tmp
             self.__init_tuple(tmp)
 
 
@@ -293,7 +295,7 @@ class Grammar:
         "NUM": "\\d+"
     }
     
-    :returns: [(raw token, terminal in cfg)...]
+    :returns: [(terminal in cfg, raw token)...]
     """
     def lex(self, ip: Iterable[str], spcl: Dict[str, str] = None) -> Sequence[Tuple[str, str]]:
         # cannot have mutable default arguments
@@ -316,21 +318,21 @@ class Grammar:
                 for s in terms:
                     if line.startswith(s):
                         # if so, set longest to the longer of the two tokens
-                        longest = (s, s) if len(s) > len(longest[0]) else longest
+                        longest = (s, s) if len(s) > len(longest[1]) else longest
                 # now check specials
                 for name in spcl:
                     # match the beginning of the string with the regex
                     r = spcl[name].match(line, 0)
                     if r is not None:
                         # set the longer of the two tokens
-                        longest = (r[0], name) if len(r[0]) > len(longest[0]) else longest
+                        longest = (name, r[0]) if len(r[0]) > len(longest[1]) else longest
                 # if we matched nothing, throw
                 if longest[0] == "":
                     raise CFGException("Invalid token starting with \"" + line + "\"")
                 # save the token we read
                 ret.append(longest)
                 # now get rid of the token we just read from the line
-                line = line[len(longest[0]):].strip()
+                line = line[len(longest[1]):].strip()
         return ret
 
     """
