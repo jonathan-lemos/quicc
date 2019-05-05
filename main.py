@@ -115,7 +115,13 @@ class Item:
 class ItemSet:
     __items: Sequence[Item]
     __shift: Dict[str, "ItemSet"]
-    __reduce: Dict[str, str]
+    __reduce: Dict[str, Item]
+
+    def reduce(self):
+        return self.__reduce
+
+    def shift(self):
+        return self.__shift
 
     def __init__(self, base: Sequence[Item], grammar: Grammar, base_so_far: Dict[Sequence[Item], "ItemSet"]):
         self.__items = base
@@ -129,13 +135,13 @@ class ItemSet:
                         raise ItemException("reduce/reduce conflict (" + char + " -> (" + str(self.__reduce[char]) + ", " + str(item) + "))")
                     if char in self.__shift:
                         raise ItemException("shift/reduce conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + str(item) + "))")
-                    self.__reduce[char] = item.nt()
+                    self.__reduce[char] = item
             else:
                 char = item.current()
                 if char in self.__shift:
                     raise ItemException("shift/shift conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + char + "))")
                 if char in self.__reduce:
-                    raise ItemException("shift/reduce conflict (" + char + " -> (" + self.__reduce[char] + ", " + str(item) + "))")
+                    raise ItemException("shift/reduce conflict (" + char + " -> (" + str(self.__reduce[char]) + ", " + str(item) + "))")
                 tmp = item.advanced().closure(grammar)
                 if tmp in base_so_far:
                     self.__shift[char] = base_so_far[tmp]
@@ -161,12 +167,11 @@ class ItemSet:
                     ilist.append(itemset)
                     q.append(itemset)
 
-        def item2string(x: Item, shift: Dict[str, "ItemSet"], idict: Dict["ItemSet", int]):
+        def item2string(x: Item, shift: Dict[str, "ItemSet"], xdict: Dict["ItemSet", int]):
             if x.is_reduce():
                 return str(x) + " (R)"
             else:
-                return str(x) + " (S" + str(idict[shift[x.current()]]) + ")"
-
+                return str(x) + " (S" + str(xdict[shift[x.current()]]) + ")"
 
         s = ""
         for i, itemset in enumerate(ilist):
@@ -190,7 +195,6 @@ class ASTNode:
         return iter(self.__children)
 
 
-
 class LR1Parser:
     __base: ItemSet
     __grammar: Grammar
@@ -209,11 +213,37 @@ class LR1Parser:
             arg = self.__grammar.lex(arg)
         arg: Sequence[Tuple[str, str]] = arg
 
-        triples = [(x[0], x[1], y[0]) for x, y in zip(arg, list(arg[1:]) + [("$", "$")])]
+        triples: Deque[Tuple[str, str]] = deque(arg)
+        triples.append(("$", "$"))
 
-        stack: Deque[str] = deque(["$", "0"])
-        for token, raw, follow in triples:
-            pass
+        stack: Deque[Union[str, ItemSet]] = deque(["$", self.__base])
+        while True:
+            lah = triples[0][0]
+            state: ItemSet = stack[len(stack) - 1]
+            for follow, item in state.reduce().items():
+                if lah == follow:
+                    for x in reversed(item.prod()):
+                        if len(stack) < 3:
+                            raise ParseException("Cannot reduce on stack without at least 3 elements")
+                        if not isinstance(stack.pop(), ItemSet):
+                            raise ParseException("Internal error: expected to pop state, but popped token was not of type ItemSet")
+                        tmp = stack.pop()
+                        if tmp != x:
+                            raise ParseException("Internal error: popped token \"" + tmp + "\" does not match expected token \"" + x + "\"")
+                    state = stack[len(stack) - 1]
+                    if item.nt() not in state.shift():
+                        raise ParseException("Internal error: reduced item set does not have transition for \"" + item.nt() + "\"")
+                    if item.nt() == self.__grammar.start() and lah == "$":
+                        return
+                    stack.append(item.nt())
+                    stack.append(state.shift()[item.nt()])
+                    break
+            else:
+                tok, raw = triples.popleft()
+                if tok not in state.shift():
+                    raise ParseException("No transition defined for symbol \"" + tok + "\" at the current state")
+                stack.append(tok)
+                stack.append(state.shift()[tok])
 
     def __str__(self) -> str:
         return str(self.__base)
@@ -225,6 +255,7 @@ def main():
         "C -> e C | d",
     ])
     y = LR1Parser(x)
+    y.parse("edeeed")
     z = 2 + 2
     """
     x = Grammar([
