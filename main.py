@@ -1,6 +1,7 @@
 from grammar import Grammar
 from collections import deque
 from typing import Deque, Dict, Iterator, List, Set, Tuple, Sequence, Union
+import cProfile
 
 
 class ItemException(Exception):
@@ -49,6 +50,7 @@ class Item:
     __prod: Sequence[str]
     __follow: Set[str]
     __dotpos: int
+    __hash: int
 
     def nt(self):
         return self.__nt
@@ -72,7 +74,7 @@ class Item:
         return self.__dotpos >= len(self.__prod)
 
     def closure(self, grammar: Grammar) -> Sequence["Item"]:
-        ret: List["Item"] = []
+        ret: Set["Item"] = set()
         q: Deque["Item"] = deque([self])
         nonterms = set(grammar.nonterms())
 
@@ -80,7 +82,9 @@ class Item:
 
         while len(q) > 0:
             n = q.popleft()
-            ret.append(n)
+            if n in ret:
+                continue
+            ret.add(n)
             if n.is_reduce():
                 continue
             sym = n.current()
@@ -95,7 +99,7 @@ class Item:
         return tuple(ret)
 
     def __hash__(self):
-        return hash(self.__nt) + hash(self.__prod) + hash(tuple(self.__follow)) + self.__dotpos
+        return self.__hash
 
     def __eq__(self, other):
         if not isinstance(other, Item):
@@ -107,6 +111,7 @@ class Item:
         self.__prod = prod
         self.__follow = follow
         self.__dotpos = dotpos
+        self.__hash = hash(self.__nt) + hash(self.__prod) + hash(tuple(self.__follow)) + self.__dotpos
 
     def __str__(self):
         return self.__nt + " -> " + " ".join(self.__prod[0:self.__dotpos]) + " . " + " ".join(self.__prod[self.__dotpos:]) + " {" + ",".join(self.__follow) + "}"
@@ -114,8 +119,35 @@ class Item:
 
 class ItemSet:
     __items: Sequence[Item]
-    __shift: Dict[str, "ItemSet"]
+    __shift: Dict[str, Tuple[int, Item]]
     __reduce: Dict[str, Item]
+    __hash: int
+
+    @staticmethod
+    def generate(base: Sequence[Item], grammar: Grammar) -> Sequence["ItemSet"]:
+        ret: List["ItemSet"] = []
+        hit: Dict[Sequence[Item], int] = {base: 0}
+        setup: Set[Sequence[Item]] = {base}
+
+        q: Deque[Sequence[Item]] = deque([base])
+        while len(q) > 0:
+            cur = q.popleft()
+            ind = len(ret)
+            if cur in setup:
+                continue
+            setup.add(cur)
+            hit[cur] = ind
+            ret.append(ItemSet(cur, {}, {}))
+
+            for item in cur:
+                if item.is_reduce():
+                    for char in item.follow():
+                        if char in ret[ind].__reduce:
+                            raise ItemException("reduce/reduce conflict")
+                        if char in ret[ind].__shift:
+                            raise ItemException("shift/reduce conflict")
+                        ret[ind].__reduce[char] = item
+
 
     def reduce(self):
         return self.__reduce
@@ -123,6 +155,7 @@ class ItemSet:
     def shift(self):
         return self.__shift
 
+    """
     def __init__(self, base: Sequence[Item], grammar: Grammar, base_so_far: Dict[Sequence[Item], "ItemSet"]):
         self.__items = base
         self.__shift = {}
@@ -138,21 +171,36 @@ class ItemSet:
                     self.__reduce[char] = item
             else:
                 char = item.current()
-                if char in self.__shift:
-                    raise ItemException("shift/shift conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + char + "))")
                 if char in self.__reduce:
                     raise ItemException("shift/reduce conflict (" + char + " -> (" + str(self.__reduce[char]) + ", " + str(item) + "))")
+                if char in self.__shift:
+                    raise ItemException("shift/shift conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + char + "))")
                 tmp = item.advanced().closure(grammar)
                 if tmp in base_so_far:
                     self.__shift[char] = base_so_far[tmp]
                 else:
                     self.__shift[char] = ItemSet(item.advanced().closure(grammar), grammar, base_so_far)
+        self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
+    """
+
+    def __calc_hash(self):
+        self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
+
+    def __init__(self, items: Sequence[Item], shift: Dict[str, Tuple[int, Item]], reduce: Dict[str, Item]):
+        self.__items = items
+        self.__shift = shift
+        self.__reduce = reduce
 
     def __iter__(self) -> Iterator[Item]:
         return iter(self.__items)
 
     def __hash__(self):
-        return hash(self.__items) + hash(self.__shift.values()) + hash(self.__reduce.values())
+        return self.__hash
+
+    def __eq__(self, other):
+        if not isinstance(other, ItemSet):
+            return False
+        return self.__items == other.__items and self.__shift == other.__shift and self.__reduce == other.__reduce
 
     def __str__(self) -> str:
         ilist: List["ItemSet"] = [self]
@@ -250,13 +298,6 @@ class LR1Parser:
 
 
 def main():
-    x = Grammar([
-        "S -> C C",
-        "C -> e C | d",
-    ])
-    y = LR1Parser(x)
-    y.parse("edeeed")
-    z = 2 + 2
     """
     x = Grammar([
         "program -> declaration-list",
@@ -289,15 +330,13 @@ def main():
         "args -> arg-list | #",
         "arg-list -> arg-list , expression | expression",
     ])
-    print(x.lex([
-        "int main(void) {",
-        "   return 0;",
-        "}"
-    ], {
-        "ID": "[A-Za-z]+",
-        "NUM": "\\d+|\\d\\.\\d+"
-    }))
     """
+    x = Grammar([
+        "E -> + T | #",
+        "T -> T x | E"
+    ])
+    y = LR1Parser(x)
+    z = 2 + 2
 
 
 if __name__ == '__main__':

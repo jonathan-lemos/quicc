@@ -86,6 +86,7 @@ class Nonterm:
 class Grammar:
     __rules: Dict[str, Nonterm] = {}
     __terminals: Set[str] = set()
+    __ent: Union[Set[str], None] = None
     __start: str = ""
 
     """
@@ -180,6 +181,9 @@ class Grammar:
     Returns all of the non-terminals that can produce epsilon.
     """
     def epsilon_nonterms(self) -> Set[str]:
+        if self.__ent is not None:
+            return self.__ent
+
         ret = {"#"}
 
         # while the set is changing
@@ -197,6 +201,7 @@ class Grammar:
                     ret |= {nt}
             # if the set didn't change on this iteration, break
             if len_tmp == len(ret):
+                self.__ent = ret
                 return ret
 
     """
