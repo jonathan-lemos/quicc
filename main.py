@@ -1,6 +1,6 @@
 from grammar import Grammar
 from collections import deque
-from typing import Deque, Dict, Iterator, List, Set, Tuple, Sequence, Union
+from typing import Deque, Dict, FrozenSet, Iterable, Iterator, List, Set, Tuple, Sequence, Union
 import cProfile
 
 
@@ -73,7 +73,7 @@ class Item:
     def is_reduce(self):
         return self.__dotpos >= len(self.__prod)
 
-    def closure(self, grammar: Grammar) -> Sequence["Item"]:
+    def closure(self, grammar: Grammar) -> Set["Item"]:
         ret: Set["Item"] = set()
         q: Deque["Item"] = deque([self])
         nonterms = set(grammar.nonterms())
@@ -96,7 +96,7 @@ class Item:
                         lh |= parent_follows[n.prod()]
                     q.append(Item(sym, prod, parent_follows[n.prod()], 0))
                     parent_follows[prod] = lh
-        return tuple(ret)
+        return ret
 
     def __hash__(self):
         return self.__hash
@@ -118,36 +118,39 @@ class Item:
 
 
 class ItemSet:
-    __items: Sequence[Item]
+    __items: FrozenSet[Item]
     __shift: Dict[str, Tuple[int, Item]]
     __reduce: Dict[str, Item]
     __hash: int
 
     @staticmethod
     def generate(base: Sequence[Item], grammar: Grammar) -> Sequence["ItemSet"]:
-        ret: List["ItemSet"] = []
-        hit: Dict[Sequence[Item], int] = {base: 0}
-        setup: Set[Sequence[Item]] = {base}
+        ret: List["ItemSet"] = [ItemSet(base, {}, {})]
+        hit: Dict[FrozenSet[Item], int] = {base: 0}
 
-        q: Deque[Sequence[Item]] = deque([base])
-        while len(q) > 0:
-            cur = q.popleft()
-            ind = len(ret)
-            if cur in setup:
-                continue
-            setup.add(cur)
-            hit[cur] = ind
-            ret.append(ItemSet(cur, {}, {}))
-
-            for item in cur:
+        i = 0
+        while i < len(ret):
+            for item in ret[i]:
                 if item.is_reduce():
                     for char in item.follow():
-                        if char in ret[ind].__reduce:
-                            raise ItemException("reduce/reduce conflict")
-                        if char in ret[ind].__shift:
-                            raise ItemException("shift/reduce conflict")
-                        ret[ind].__reduce[char] = item
-
+                        if char in ret[i].__reduce:
+                            raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + item + "\")")
+                        if char in ret[i].__shift:
+                            raise ItemException("shift/reduce conflict (\"" + str(ret[i].__shift[char][1]) + "\", \"" + item + "\")")
+                        ret[i].__reduce[char] = (item
+                else:
+                    char = item.current()
+                    if char in ret[i].__reduce:
+                        raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + item + "\")")
+                    target = item.advanced().closure(grammar)
+                    if char in ret[i].__shift:
+                        ret[ret[i].__shift[char][0]].__items = frozenset(target.union(ret[i].__shift[char]))
+                        target = frozenset(target.union(ret[i].__shift[char]))
+                        hit[target] = ret[i].__shift[char][0]
+                    if target not in hit:
+                        ret.append(ItemSet(target, {}, {}))
+                        hit[target] = len(ret) - 1
+                    ret[i].__shift[char] = (hit[target], item)
 
     def reduce(self):
         return self.__reduce
@@ -186,8 +189,8 @@ class ItemSet:
     def __calc_hash(self):
         self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
 
-    def __init__(self, items: Sequence[Item], shift: Dict[str, Tuple[int, Item]], reduce: Dict[str, Item]):
-        self.__items = items
+    def __init__(self, items: Iterable[Item], shift: Dict[str, Tuple[int, Item]], reduce: Dict[str, Item]):
+        self.__items = frozenset(items)
         self.__shift = shift
         self.__reduce = reduce
 
