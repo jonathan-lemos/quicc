@@ -111,7 +111,7 @@ class Item:
         self.__prod = prod
         self.__follow = follow
         self.__dotpos = dotpos
-        self.__hash = hash(self.__nt) + hash(self.__prod) + hash(tuple(self.__follow)) + self.__dotpos
+        self.__hash = hash(self.__nt) + hash(self.__prod) + hash(tuple(sorted(self.__follow))) + self.__dotpos
 
     def __str__(self):
         return self.__nt + " -> " + " ".join(self.__prod[0:self.__dotpos]) + " . " + " ".join(self.__prod[self.__dotpos:]) + " {" + ",".join(self.__follow) + "}"
@@ -124,9 +124,9 @@ class ItemSet:
     __hash: int
 
     @staticmethod
-    def generate(base: Sequence[Item], grammar: Grammar) -> Sequence["ItemSet"]:
+    def generate(base: Iterable[Item], grammar: Grammar) -> Sequence["ItemSet"]:
         ret: List["ItemSet"] = [ItemSet(base, {}, {})]
-        hit: Dict[FrozenSet[Item], int] = {base: 0}
+        hit: Dict[FrozenSet[Item], int] = {frozenset(base): 0}
 
         i = 0
         while i < len(ret):
@@ -134,15 +134,15 @@ class ItemSet:
                 if item.is_reduce():
                     for char in item.follow():
                         if char in ret[i].__reduce:
-                            raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + item + "\")")
+                            raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
                         if char in ret[i].__shift:
-                            raise ItemException("shift/reduce conflict (\"" + str(ret[i].__shift[char][1]) + "\", \"" + item + "\")")
-                        ret[i].__reduce[char] = (item
+                            raise ItemException("shift/reduce conflict (\"" + str(ret[i].__shift[char][1]) + "\", \"" + str(item) + "\")")
+                        ret[i].__reduce[char] = item
                 else:
                     char = item.current()
                     if char in ret[i].__reduce:
-                        raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + item + "\")")
-                    target = item.advanced().closure(grammar)
+                        raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
+                    target = frozenset(item.advanced().closure(grammar))
                     if char in ret[i].__shift:
                         ret[ret[i].__shift[char][0]].__items = frozenset(target.union(ret[i].__shift[char]))
                         target = frozenset(target.union(ret[i].__shift[char]))
@@ -151,6 +151,8 @@ class ItemSet:
                         ret.append(ItemSet(target, {}, {}))
                         hit[target] = len(ret) - 1
                     ret[i].__shift[char] = (hit[target], item)
+            i += 1
+        return ret
 
     def reduce(self):
         return self.__reduce
@@ -206,29 +208,10 @@ class ItemSet:
         return self.__items == other.__items and self.__shift == other.__shift and self.__reduce == other.__reduce
 
     def __str__(self) -> str:
-        ilist: List["ItemSet"] = [self]
-        idict: Dict["ItemSet", int] = {self: 0}
-        q: Deque["ItemSet"] = deque([self])
+        def shift2string(x: Tuple[int, Item]):
+            return str(x[1]) + " (S" + str(x[0]) + ")"
 
-        while len(q) > 0:
-            cur = q.popleft()
-            for itemset in cur.__shift.values():
-                if itemset not in idict:
-                    idict[itemset] = len(ilist)
-                    ilist.append(itemset)
-                    q.append(itemset)
-
-        def item2string(x: Item, shift: Dict[str, "ItemSet"], xdict: Dict["ItemSet", int]):
-            if x.is_reduce():
-                return str(x) + " (R)"
-            else:
-                return str(x) + " (S" + str(xdict[shift[x.current()]]) + ")"
-
-        s = ""
-        for i, itemset in enumerate(ilist):
-            s += str(i) + ":\n"
-            s += "\n".join(item2string(x, itemset.__shift, idict) for x in itemset.__items) + "\n\n"
-        return s.strip()
+        return "\n".join({shift2string(x) for x in self.__shift.values()} | {str(x) for x in self.__reduce.values()})
 
 
 class ASTNode:
@@ -247,7 +230,7 @@ class ASTNode:
 
 
 class LR1Parser:
-    __base: ItemSet
+    __sets: Sequence[ItemSet]
     __grammar: Grammar
 
     def __init__(self, grammar: Grammar):
@@ -257,7 +240,7 @@ class LR1Parser:
         new_start_rule = new_start + " -> " + old_start
         g = Grammar([new_start_rule] + str(grammar).split("\n"))
         start_item = Item(new_start, (old_start,), {"$"}, 0)
-        self.__base = ItemSet(start_item.closure(g), g, {})
+        self.__sets = ItemSet.generate(start_item.closure(g), g)
 
     def parse(self, arg: Union[str, Sequence[Tuple[str, str]]]):
         if isinstance(arg, str):
@@ -297,7 +280,7 @@ class LR1Parser:
                 stack.append(state.shift()[tok])
 
     def __str__(self) -> str:
-        return str(self.__base)
+        return "\n".join(str(x[0]) + ":\n" + str(x[1]) + "\n" for x in enumerate(self.__sets)).strip()
 
 
 def main():
@@ -334,11 +317,18 @@ def main():
         "arg-list -> arg-list , expression | expression",
     ])
     """
+    """
     x = Grammar([
         "E -> + T | #",
         "T -> T x | E"
     ])
+    """
+    x = Grammar([
+        "S -> C C",
+        "C -> e C | d"
+    ])
     y = LR1Parser(x)
+    print(str(y))
     z = 2 + 2
 
 
