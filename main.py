@@ -144,14 +144,17 @@ class ItemSet:
                         raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
                     target = frozenset(item.advanced().closure(grammar))
                     if char in ret[i].__shift:
-                        ret[ret[i].__shift[char][0]].__items = frozenset(target.union(ret[i].__shift[char]))
-                        target = frozenset(target.union(ret[i].__shift[char]))
-                        hit[target] = ret[i].__shift[char][0]
+                        target_ind = ret[i].__shift[char][0]
+                        ret[target_ind].__items = frozenset(target.union(target.union(ret[target_ind].__items)))
+                        target = frozenset(target.union(target.union(ret[target_ind].__items)))
+                        hit[target] = target_ind
                     if target not in hit:
                         ret.append(ItemSet(target, {}, {}))
                         hit[target] = len(ret) - 1
                     ret[i].__shift[char] = (hit[target], item)
             i += 1
+        for itemset in ret:
+            itemset.__calc_hash()
         return ret
 
     def reduce(self):
@@ -159,34 +162,6 @@ class ItemSet:
 
     def shift(self):
         return self.__shift
-
-    """
-    def __init__(self, base: Sequence[Item], grammar: Grammar, base_so_far: Dict[Sequence[Item], "ItemSet"]):
-        self.__items = base
-        self.__shift = {}
-        self.__reduce = {}
-        base_so_far[base] = self
-        for item in base:
-            if item.is_reduce():
-                for char in item.follow():
-                    if char in self.__reduce:
-                        raise ItemException("reduce/reduce conflict (" + char + " -> (" + str(self.__reduce[char]) + ", " + str(item) + "))")
-                    if char in self.__shift:
-                        raise ItemException("shift/reduce conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + str(item) + "))")
-                    self.__reduce[char] = item
-            else:
-                char = item.current()
-                if char in self.__reduce:
-                    raise ItemException("shift/reduce conflict (" + char + " -> (" + str(self.__reduce[char]) + ", " + str(item) + "))")
-                if char in self.__shift:
-                    raise ItemException("shift/shift conflict (" + char + " -> (" + str(self.__shift[char]) + ", " + char + "))")
-                tmp = item.advanced().closure(grammar)
-                if tmp in base_so_far:
-                    self.__shift[char] = base_so_far[tmp]
-                else:
-                    self.__shift[char] = ItemSet(item.advanced().closure(grammar), grammar, base_so_far)
-        self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
-    """
 
     def __calc_hash(self):
         self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
@@ -211,7 +186,7 @@ class ItemSet:
         def shift2string(x: Tuple[int, Item]):
             return str(x[1]) + " (S" + str(x[0]) + ")"
 
-        return "\n".join({shift2string(x) for x in self.__shift.values()} | {str(x) for x in self.__reduce.values()})
+        return "\n".join({shift2string(x) for x in self.__shift.values()} | {str(x) + " (R)" for x in self.__reduce.values()})
 
 
 class ASTNode:
@@ -284,7 +259,6 @@ class LR1Parser:
 
 
 def main():
-    """
     x = Grammar([
         "program -> declaration-list",
         "declaration-list -> declaration-list declaration | declaration",
@@ -305,28 +279,26 @@ def main():
         "return-stmt -> return ; | return expression ;",
         "expression -> var = expression | simple-expression",
         "var -> ID | ID [ expression ]",
-        "simple-expression -> additive-expression relop additive-expression | additive-expression",
-        "relop -> <= | < | > | >= | == | !=",
-        "additive-expression -> additive-expression addop term | term",
-        "addop -> + | -",
-        "term -> term mulop factor | factor",
-        "mulop -> * | /",
+        "simple-expression -> additive-expression RELOP additive-expression | additive-expression",
+        "additive-expression -> additive-expression ADDOP term | term",
+        "term -> term MULOP factor | factor",
         "factor -> ( expression ) | var | call | NUM",
         "call -> ID ( args )",
         "args -> arg-list | #",
         "arg-list -> arg-list , expression | expression",
     ])
-    """
-    """
-    x = Grammar([
-        "E -> + T | #",
-        "T -> T x | E"
-    ])
-    """
-    x = Grammar([
-        "S -> C C",
-        "C -> e C | d"
-    ])
+    tokens = x.lex([
+        "int main(void) {",
+        "   return 0;",
+        "}"
+    ], {
+        "NUM": "[0-9]+\\.[0-9]+|[0-9]+",
+        "ID": "[A-Za-z]+",
+        "RELOP": "<=|<|>|>=|==|!=",
+        "ADDOP": "[+\\-]",
+        "MULOP": "[*/]",
+    })
+    z = x.follow_sets()
     y = LR1Parser(x)
     print(str(y))
     z = 2 + 2
