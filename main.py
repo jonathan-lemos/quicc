@@ -73,30 +73,33 @@ class Item:
     def is_reduce(self):
         return self.__dotpos >= len(self.__prod)
 
-    def closure(self, grammar: Grammar) -> Set["Item"]:
-        ret: Set["Item"] = set()
+    def closure(self, grammar: Grammar) -> Sequence["Item"]:
+        ret: List["Item"] = []
+        hit: Set["Item"] = set()
         q: Deque["Item"] = deque([self])
         nonterms = set(grammar.nonterms())
 
-        parent_follows = {self.__prod: self.__follow}
+        parent_follows = {self: self.__follow}
 
         while len(q) > 0:
             n = q.popleft()
             if n in ret:
                 continue
-            ret.add(n)
+            ret.append(n)
+            hit.add(n)
             if n.is_reduce():
                 continue
             sym = n.current()
             if sym in nonterms:
                 for prod in grammar[sym]:
-                    lh = lookahead(prod, n.dotpos(), grammar)
+                    tmp = Item(sym, prod, parent_follows[n], 0)
+                    q.append(tmp)
+                    lh = lookahead(prod, 0, grammar)
                     if "$$" in lh:
                         lh -= {"$$"}
-                        lh |= parent_follows[n.prod()]
-                    q.append(Item(sym, prod, parent_follows[n.prod()], 0))
-                    parent_follows[prod] = lh
-        return ret
+                        lh |= parent_follows[n]
+                    parent_follows[tmp] = lh
+        return tuple(ret)
 
     def __hash__(self):
         return self.__hash
@@ -118,15 +121,15 @@ class Item:
 
 
 class ItemSet:
-    __items: FrozenSet[Item]
+    __items: Sequence[Item]
     __shift: Dict[str, Tuple[int, Item]]
     __reduce: Dict[str, Item]
     __hash: int
 
     @staticmethod
-    def generate(base: Iterable[Item], grammar: Grammar) -> Sequence["ItemSet"]:
+    def generate(base: Sequence[Item], grammar: Grammar) -> Sequence["ItemSet"]:
         ret: List["ItemSet"] = [ItemSet(base, {}, {})]
-        hit: Dict[FrozenSet[Item], int] = {frozenset(base): 0}
+        hit: Dict[Sequence[Item], int] = {base: 0}
 
         i = 0
         while i < len(ret):
@@ -135,19 +138,33 @@ class ItemSet:
                     for char in item.follow():
                         if char in ret[i].__reduce:
                             raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
+                            pass
                         if char in ret[i].__shift:
                             raise ItemException("shift/reduce conflict (\"" + str(ret[i].__shift[char][1]) + "\", \"" + str(item) + "\")")
+                            pass
                         ret[i].__reduce[char] = item
                 else:
                     char = item.current()
                     if char in ret[i].__reduce:
                         raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
-                    target = frozenset(item.advanced().closure(grammar))
+                        pass
+
+                    target = item.advanced().closure(grammar)
+
                     if char in ret[i].__shift:
                         target_ind = ret[i].__shift[char][0]
-                        ret[target_ind].__items = frozenset(target.union(target.union(ret[target_ind].__items)))
-                        target = frozenset(target.union(target.union(ret[target_ind].__items)))
+
+                        tmp = list(ret[target_ind].__items)
+                        tmpset = set(tmp)
+                        for x in target:
+                            if x not in tmpset:
+                                tmp.append(x)
+                                tmpset.add(x)
+
+                        ret[target_ind].__items = tuple(tmp)
+                        target = ret[target_ind].__items
                         hit[target] = target_ind
+
                     if target not in hit:
                         ret.append(ItemSet(target, {}, {}))
                         hit[target] = len(ret) - 1
@@ -166,8 +183,8 @@ class ItemSet:
     def __calc_hash(self):
         self.__hash = hash(self.__items) + hash(tuple(self.__shift.items())) + hash(tuple(self.__reduce.items()))
 
-    def __init__(self, items: Iterable[Item], shift: Dict[str, Tuple[int, Item]], reduce: Dict[str, Item]):
-        self.__items = frozenset(items)
+    def __init__(self, items: Sequence[Item], shift: Dict[str, Tuple[int, Item]], reduce: Dict[str, Item]):
+        self.__items = items
         self.__shift = shift
         self.__reduce = reduce
 
@@ -219,56 +236,56 @@ class LR1Parser:
 
     def parse(self, arg: Union[str, Sequence[Tuple[str, str]]]):
         if isinstance(arg, str):
-            arg = self.__grammar.lex(arg)
+            arg = self.__grammar.lex([arg])
         arg: Sequence[Tuple[str, str]] = arg
 
         triples: Deque[Tuple[str, str]] = deque(arg)
         triples.append(("$", "$"))
 
-        stack: Deque[Union[str, ItemSet]] = deque(["$", self.__base])
+        stack: Deque[Union[str, int]] = deque(["$", 0])
         while True:
             lah = triples[0][0]
-            state: ItemSet = stack[len(stack) - 1]
-            for follow, item in state.reduce().items():
+            state: int = stack[len(stack) - 1]
+            for follow, item in self.__sets[state].reduce().items():
                 if lah == follow:
                     for x in reversed(item.prod()):
                         if len(stack) < 3:
                             raise ParseException("Cannot reduce on stack without at least 3 elements")
-                        if not isinstance(stack.pop(), ItemSet):
-                            raise ParseException("Internal error: expected to pop state, but popped token was not of type ItemSet")
+                        if not isinstance(stack.pop(), int):
+                            raise ParseException("Internal error: expected to pop state, but popped token was not of type int")
                         tmp = stack.pop()
                         if tmp != x:
                             raise ParseException("Internal error: popped token \"" + tmp + "\" does not match expected token \"" + x + "\"")
                     state = stack[len(stack) - 1]
-                    if item.nt() not in state.shift():
+                    if item.nt() not in self.__sets[state].shift():
                         raise ParseException("Internal error: reduced item set does not have transition for \"" + item.nt() + "\"")
                     if item.nt() == self.__grammar.start() and lah == "$":
                         return
                     stack.append(item.nt())
-                    stack.append(state.shift()[item.nt()])
+                    stack.append(self.__sets[state].shift()[item.nt()][0])
                     break
             else:
                 tok, raw = triples.popleft()
-                if tok not in state.shift():
+                if tok not in self.__sets[state].shift():
                     raise ParseException("No transition defined for symbol \"" + tok + "\" at the current state")
                 stack.append(tok)
-                stack.append(state.shift()[tok])
+                stack.append(self.__sets[state].shift()[tok][0])
 
     def __str__(self) -> str:
         return "\n".join(str(x[0]) + ":\n" + str(x[1]) + "\n" for x in enumerate(self.__sets)).strip()
 
 
 def main():
+    """
     x = Grammar([
         "program -> declaration-list",
         "declaration-list -> declaration-list declaration | declaration",
         "declaration -> var-declaration | fun-declaration",
-        "var-declaration -> type-specifier ID ; | type-specifier ID [ NUM ] ;",
-        "type-specifier -> int | void | float",
-        "fun-declaration -> type-specifier ID ( params ) compound-stmt",
+        "var-declaration -> TYPE ID ; | TYPE ID [ NUM ] ;",
+        "fun-declaration -> TYPE ID ( params ) compound-stmt",
         "params -> param-list | void",
         "param-list -> param-list , param | param",
-        "param -> type-specifier ID | type-specifier ID [ ]",
+        "param -> TYPE ID | TYPE ID [ ]",
         "compound-stmt -> { local-declarations statement-list }",
         "local-declarations -> local-declarations var-declaration | #",
         "statement-list -> statement-list statement | #",
@@ -297,10 +314,21 @@ def main():
         "RELOP": "<=|<|>|>=|==|!=",
         "ADDOP": "[+\\-]",
         "MULOP": "[*/]",
+        "TYPE": "int|void|float",
     })
+    """
+    x = Grammar([
+        "E -> F + E | F",
+        "F -> C | V | ( E )",
+        "V -> id",
+        "C -> id ( args )"
+    ])
+    a = x.terminals()
+    b = x.nonterms()
     z = x.follow_sets()
     y = LR1Parser(x)
     print(str(y))
+    y.parse("( id )")
     z = 2 + 2
 
 
