@@ -64,14 +64,18 @@ class Nonterm:
     __symbol: str = ""
     __productions: Set[Tuple[str]]
 
-    def __init__(self, nt: str, *rhs: str):
+    def __init__(self, nt: str, *rhs: Union[str, Tuple[str]]):
         if len(rhs) == 0:
             raise CFGException("A Nonterm needs to be produced out of at least one string")
 
         self.__symbol = nt
 
-        for st in rhs:
-            self.__productions = {tokenize(x) for x in st.split("|")}
+        if isinstance(rhs[0], str):
+            for st in rhs:
+                self.__productions = {tokenize(x) for x in st.split("|")}
+        else:
+            self.__productions = set(rhs)
+
 
     def symbol(self):
         return self.__symbol
@@ -137,6 +141,8 @@ class Grammar:
         vals: Dict[str, List[Sequence[str]]] = {}
 
         for nt, prod in cfg:
+            if self.__start == "":
+                self.__start = nt
             if nt not in vals:
                 vals[nt] = [prod]
             else:

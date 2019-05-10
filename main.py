@@ -19,7 +19,7 @@ def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
     epsilons = grammar.epsilon_nonterms()
     nonterms = grammar.nonterms()
     ret = set()
-    nthit = set()
+    nt_passed = set()
     stk = deque()
     stk.append(prod[dotpos + 1:])
 
@@ -28,11 +28,14 @@ def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
         hit = False
         for token in cur:
             if token in nonterms:
-                if token in nthit:
-                    hit = True
-                    break
+                if token in nt_passed:
+                    if token in epsilons:
+                        continue
+                    else:
+                        hit = True
+                        break
                 else:
-                    nthit.add(token)
+                    nt_passed.add(token)
                     for nt, p in filter(lambda x: x[0] == token, grammar):
                         stk.append(p)
             else:
@@ -42,6 +45,7 @@ def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
                 break
         if not hit:
             ret.add("$$")
+
     return ret
 
 
@@ -139,7 +143,7 @@ class ItemSet:
             for item in ret[i]:
                 if item.is_reduce():
                     for char in item.follow():
-                        if char in ret[i].__reduce:
+                        if char in ret[i].__reduce and ret[i].__reduce[char].nt() != item.nt():
                             raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
                             pass
                         if char in ret[i].__shift:
@@ -258,40 +262,44 @@ class LR1Parser:
         triples.append(("$", "$"))
 
         stack: Deque[Union[str, int]] = deque(["$", 0])
+
         while True:
-            lah = triples[0][0]
+            look, raw = triples[0]
             state: int = stack[len(stack) - 1]
-            for follow, item in self.__sets[state].reduce().items():
-                if lah == follow:
-                    for x in reversed(item.prod()):
-                        if len(stack) < 3:
-                            raise ParseException("Cannot reduce on stack without at least 3 elements")
-                        if not isinstance(stack.pop(), int):
-                            raise ParseException("Internal error: expected to pop state, but popped token was not of type int")
-                        tmp = stack.pop()
-                        if tmp != x:
-                            raise ParseException("Internal error: popped token \"" + tmp + "\" does not match expected token \"" + x + "\"")
-                    state = stack[len(stack) - 1]
-                    if item.nt() not in self.__sets[state].shift():
-                        raise ParseException("Internal error: reduced item set does not have transition for \"" + item.nt() + "\"")
-                    if item.nt() == self.__grammar.start() and lah == "$":
-                        return
-                    stack.append(item.nt())
-                    stack.append(self.__sets[state].shift()[item.nt()][0])
-                    break
+
+            if look in self.__sets[state].shift():
+                triples.popleft()
+                stack.append(look)
+                stack.append(self.__sets[state].shift()[look][0])
+            elif look in self.__sets[state].reduce():
+                item = self.__sets[state].reduce()[look]
+                for x in reversed(item.prod()):
+                    if len(stack) < 3:
+                        raise ParseException("Cannot reduce on stack without at least 3 elements")
+                    if not isinstance(stack.pop(), int):
+                        raise ParseException("Internal error: expected to pop state, but popped token was not of type int")
+                    tmp = stack.pop()
+                    if tmp != x:
+                        raise ParseException("Internal error: popped token \"" + tmp + "\" does not match expected token \"" + x + "\"")
+                state = stack[len(stack) - 1]
+                if item.nt() not in self.__sets[state].shift():
+                    raise ParseException("Internal error: reduced item set does not have transition for \"" + item.nt() + "\"")
+                if item.nt() == self.__grammar.start() and look == "$":
+                    return
+                stack.append(item.nt())
+                stack.append(self.__sets[state].shift()[item.nt()][0])
+            elif "#" in self.__sets[state].shift():
+                stack.append("#")
+                stack.append(self.__sets[state].shift()["#"][0])
             else:
-                tok, raw = triples.popleft()
-                if tok not in self.__sets[state].shift():
-                    raise ParseException("No transition defined for symbol \"" + tok + "\" at the current state")
-                stack.append(tok)
-                stack.append(self.__sets[state].shift()[tok][0])
+                raise ParseException("No transition defined at state " + str(state) + " for symbol " + str(look))
+
 
     def __str__(self) -> str:
         return "\n".join(str(x[0]) + ":\n" + str(x[1]) + "\n" for x in enumerate(self.__sets)).strip()
 
 
 def main():
-    """
     x = Grammar([
         "program -> declaration-list",
         "declaration-list -> declaration-list declaration | declaration",
@@ -301,12 +309,14 @@ def main():
         "params -> param-list | void",
         "param-list -> param-list , param | param",
         "param -> TYPE ID | TYPE ID [ ]",
+        "TYPE -> int | float | void",
         "compound-stmt -> { local-declarations statement-list }",
         "local-declarations -> local-declarations var-declaration | #",
         "statement-list -> statement-list statement | #",
         "statement -> expression-stmt | compound-stmt | selection-stmt | iteration-stmt | return-stmt",
         "expression-stmt -> expression ; | ;",
-        "selection-stmt -> if ( expression ) statement | if ( expression ) statement else statement",
+#       "selection-stmt -> if ( expression ) statement | if ( expression ) statement else statement",
+        "selection-stmt -> if ( expression ) statement",
         "iteration-stmt -> while ( expression ) statement",
         "return-stmt -> return ; | return expression ;",
         "expression -> var = expression | simple-expression",
@@ -320,6 +330,9 @@ def main():
         "arg-list -> arg-list , expression | expression",
     ])
     tokens = x.lex([
+        "void x(void) {",
+        "   return;",
+        "}"
         "int main(void) {",
         "   return 0;",
         "}"
@@ -329,23 +342,14 @@ def main():
         "RELOP": "<=|<|>|>=|==|!=",
         "ADDOP": "[+\\-]",
         "MULOP": "[*/]",
-        "TYPE": "int|void|float",
     })
-    """
-    x = Grammar([
-        "E -> E + F | F",
-        "F -> C | V | ( E )",
-        "V -> id",
-        "C -> id ( args )"
-    ])
-    a = x.terminals()
-    b = x.nonterms()
-    z = x.follow_sets()
+    a = x.follow_sets()
+    b = x.first_sets()
     y = LR1Parser(x)
     print(str(y))
-    y.parse("( id )")
+    y.parse(tokens)
     z = 2 + 2
 
 
 if __name__ == '__main__':
-    main()
+    cProfile.run("main()", sort='cumtime')
