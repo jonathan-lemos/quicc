@@ -79,7 +79,10 @@ class Item:
         q: Deque["Item"] = deque([self])
         nonterms = set(grammar.nonterms())
 
-        parent_follows = {self: self.__follow}
+        parent_follows = {self: lookahead(self.prod(), self.dotpos(), grammar)}
+        if "$$" in parent_follows[self]:
+            parent_follows[self] -= {"$$"}
+            parent_follows[self] |= self.__follow
 
         while len(q) > 0:
             n = q.popleft()
@@ -200,10 +203,22 @@ class ItemSet:
         return self.__items == other.__items and self.__shift == other.__shift and self.__reduce == other.__reduce
 
     def __str__(self) -> str:
+        vdict = {x[1]: x[0] for x in self.__shift.values()}
+
         def shift2string(x: Tuple[int, Item]):
             return str(x[1]) + " (S" + str(x[0]) + ")"
 
-        return "\n".join({shift2string(x) for x in self.__shift.values()} | {str(x) + " (R)" for x in self.__reduce.values()})
+        ret = ""
+        for item in self:
+            ret += str(item) + " "
+            if item.is_reduce():
+                ret += "(R)"
+            elif item not in vdict:
+                ret += "(??)"
+            else:
+                ret += "(S" + str(vdict[item]) + ")"
+            ret += "\n"
+        return ret.strip()
 
 
 class ASTNode:
@@ -318,7 +333,7 @@ def main():
     })
     """
     x = Grammar([
-        "E -> F + E | F",
+        "E -> E + F | F",
         "F -> C | V | ( E )",
         "V -> id",
         "C -> id ( args )"
