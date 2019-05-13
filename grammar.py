@@ -234,7 +234,7 @@ class Grammar:
                     tmp = len(ret[nt])
 
                     # the current nt should include the first set of this token
-                    ret[nt] |= ret[token]
+                    ret[nt] |= ret[token] - {"#"}
 
                     # if the length of this set changed, set updated to true
                     updated |= len(ret[nt]) != tmp
@@ -242,6 +242,9 @@ class Grammar:
                     # stop if this token cannot produce epsilon
                     if token not in epsilons:
                         break
+                else:
+                    ret[nt] |= {"#"}
+
             # when there are no longer any changes to make
             if not updated:
                 # return the dictionary minus the terminals
