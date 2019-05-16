@@ -10,12 +10,20 @@ class FirstFollowSets(unittest.TestCase):
         ])
         self.assertEqual(x.first_sets(), {"S": {"e", "d"}, "C": {"e", "d"}})
 
+    def test_multirule(self):
+        x = Grammar([
+            "S -> C C",
+            "C -> e C",
+            "C -> d",
+        ])
+        self.assertEqual(x.first_sets(), {"S": {"e", "d"}, "C": {"e", "d"}})
+
     def test_epsilon(self):
         x = Grammar([
             "S -> A B C",
             "A -> a | #",
             "B -> A D | b",
-            "C -> c",
+            "C -> c d",
             "D -> d | #"
         ])
         self.assertEqual(x.first_sets(), {
@@ -25,4 +33,3 @@ class FirstFollowSets(unittest.TestCase):
             "C": {"c"},
             "D": {"d", "#"},
         })
-

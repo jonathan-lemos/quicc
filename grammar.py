@@ -70,15 +70,20 @@ class Nonterm:
 
         self.__symbol = nt
 
+        self.__productions = set()
         if isinstance(rhs[0], str):
             for st in rhs:
-                self.__productions = {tokenize(x) for x in st.split("|")}
+                self.__productions |= {tokenize(x) for x in st.split("|")}
         else:
             self.__productions = set(rhs)
 
-
     def symbol(self):
         return self.__symbol
+
+    def __eq__(self, other):
+        if not isinstance(other, Nonterm):
+            return False
+        return self.__symbol == other.__symbol and self.__productions == other.__productions
 
     def __iter__(self) -> Iterator[Tuple[str]]:
         return iter(self.__productions)
@@ -354,6 +359,14 @@ class Grammar:
     """
     def __contains__(self, nt: str) -> bool:
         return nt in self.__rules
+
+    """
+    Returns true if two grammars are equivalent.
+    """
+    def __eq__(self, other):
+        if not isinstance(other, Grammar):
+            return False
+        return self.__rules.values() == other.__rules.values()
 
     """
     Gets the rules for a given non-terminal.
