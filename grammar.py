@@ -1,28 +1,30 @@
 from functools import reduce
 import re
-from typing import Dict, Iterable, Iterator, List, Sequence, Set, Tuple, Union
+from typing import Dict, FrozenSet, Iterable, Iterator, List, Sequence, Set, Tuple, Union
 
 
 class CFGException(Exception):
     pass
 
 
-"""
-Lexes a production's right hand side into a sequence of tokens.
-For example, 'A B cde "fgh \\"\\\\ ijk"' turns into ['A', 'B', 'cde', 'fgh "\ ijk']
-
-Spaces in quotations are preserved.
-r"string" denotes a regex.
-
-:param rhs: The string to lex
-:returns: The sequence of tokens
-"""
 def tokenize(rhs: str) -> Tuple[str]:
+    """
+    Lexes a production's right hand side into a sequence of tokens.
+    For example, 'A B cde "fgh \\"\\\\ ijk"' turns into ['A', 'B', 'cde', 'fgh "\\ ijk']
+
+    Spaces in quotations are preserved.
+    r"string" denotes a regex.
+
+    :param rhs: The string to lex
+    :returns: The sequence of tokens
+    """
+
     ret: List[str] = []
     cur: str = ""
     quote = False
     escape = False
     last_ws = True
+    # extra " " ends quotes properly
     for c in rhs + " ":
         if escape:
             cur += c
@@ -62,22 +64,29 @@ def tokenize(rhs: str) -> Tuple[str]:
 
 class Nonterm:
     __symbol: str = ""
-    __productions: Set[Tuple[str]]
+    __productions: FrozenSet[Tuple[str]]
 
     def __init__(self, nt: str, *rhs: Union[str, Tuple[str]]):
+        """
+        Initializes a Nonterm
+        :param nt: The symbol that these productions map to
+        :param rhs: Varargs containing strings ("a b c") or tuples ("a", "b", "c")
+        """
+
         if len(rhs) == 0:
             raise CFGException("A Nonterm needs to be produced out of at least one string")
 
         self.__symbol = nt
 
-        self.__productions = set()
         if isinstance(rhs[0], str):
-            for st in rhs:
-                self.__productions |= {tokenize(x) for x in st.split("|")}
+            self.__productions = frozenset(tokenize(x) for st in rhs for x in st.split("|"))
         else:
-            self.__productions = set(rhs)
+            self.__productions = frozenset(rhs)
 
-    def symbol(self):
+    def symbol(self) -> str:
+        """
+        Returns the symbol associated with a Nonterm
+        """
         return self.__symbol
 
     def __eq__(self, other):
@@ -85,7 +94,13 @@ class Nonterm:
             return False
         return self.__symbol == other.__symbol and self.__productions == other.__productions
 
+    def __hash__(self):
+        return hash((self.__symbol, self.__productions))
+
     def __iter__(self) -> Iterator[Tuple[str]]:
+        """
+        Iterates through the productions in this Nonterm. The order is not guaranteed in any way.
+        """
         return iter(self.__productions)
 
     def __str__(self) -> str:
@@ -98,24 +113,25 @@ class Grammar:
     __ent: Union[Set[str], None] = None
     __start: str = ""
 
-    """
-    Constructs a grammar out of a set of rules
-    Rules are given as a list of strings.
-    Each string looks like the following:
-    
-    nonterm -> term nonterm term ab c | # | "ab c" r"[0-9]+"
-    
-    Tokens are separated by spaces.
-    A regex can be given with r"your_regex_here"
-    Any token in quotes preserves spaces
-    A quote can be escaped with \"
-    
-    The starting symbol is the first in the grammar.
-    
-    :param cfg: A list of rules as described above
-    :raise Exception: Error parsing cfg
-    """
-    def __init_iter_str(self, cfg: Iterable[str]):
+    def __init_iter_str(self, cfg: Iterable[str]) -> None:
+        """
+        Constructs a grammar out of a set of rules
+        Rules are given as a list of strings.
+        Each string looks like the following:
+
+        nonterm -> term nonterm term ab c | # | "ab c" r"[0-9]+"
+
+        Tokens are separated by spaces.
+        A regex can be given with r"your_regex_here"
+        Any token in quotes preserves spaces
+        A quote can be escaped with \"
+
+        The starting symbol is the first in the grammar.
+
+        :param cfg: A list of rules as described above
+        :raise Exception: Error parsing cfg
+        """
+
         self.__start = ""
 
         vals: Dict[str, List[str]] = {}
@@ -142,7 +158,13 @@ class Grammar:
 
         self.__terminals = {x for _, prod in self for x in prod if x not in self.nonterms()}
 
-    def __init_tuple(self, cfg: Iterable[Tuple[str, Sequence[str]]]):
+    def __init_tuple(self, cfg: Iterable[Tuple[str, Sequence[str]]]) -> None:
+        """
+        Constructs a Grammar out of a list of (nonterm, ["a", "b", "c"])
+        This is used to construct a Grammar using the rules of another grammar
+        :param cfg: An iterable of tuples containing (nonterm, rule)
+        :return: void
+        """
         vals: Dict[str, List[Sequence[str]]] = {}
 
         for nt, prod in cfg:
@@ -166,32 +188,31 @@ class Grammar:
             tmp: List[Tuple[str, Sequence[str]]] = tmp
             self.__init_tuple(tmp)
 
-
-    """
-    Returns the start symbol of the grammar
-    """
     def start(self) -> str:
+        """
+        Returns the start symbol of the grammar
+        """
         return self.__start
 
-    """
-    Returns all of the non-terminals in the grammar.
-    The first nonterm is always the start symbol.
-    
-    :returns: All of the non-terminals in the grammar.
-    """
     def nonterms(self) -> Sequence[str]:
+        """
+        Returns all of the non-terminals in the grammar.
+        The first nonterm is always the start symbol.
+
+        :returns: All of the non-terminals in the grammar.
+        """
         return [self.start()] + list(set(self.__rules) - {self.start()})
 
-    """
-    Returns all of the terminals in the grammar.
-    """
     def terminals(self) -> Iterable[str]:
+        """
+        Returns all of the terminals in the grammar.
+        """
         return self.__terminals
 
-    """
-    Returns all of the non-terminals that can produce epsilon.
-    """
     def epsilon_nonterms(self) -> Set[str]:
+        """
+        Returns all of the non-terminals that can produce epsilon.
+        """
         if self.__ent is not None:
             return self.__ent
 
@@ -215,12 +236,13 @@ class Grammar:
                 self.__ent = ret
                 return ret
 
-    """
-    Returns all of the first sets in the grammar.
-    
-    :returns: A dictionary mapping each non-terminal to a set of terminals
-    """
     def first_sets(self) -> Dict[str, Set[str]]:
+        """
+        Returns all of the first sets in the grammar.
+
+        :returns: A dictionary mapping each non-terminal to a set of terminals
+        """
+
         ret = {}
         for nt in self.nonterms():
             ret[nt] = set()
@@ -255,12 +277,13 @@ class Grammar:
                 # return the dictionary minus the terminals
                 return {x: ret[x] for x in ret if x not in self.terminals()}
 
-    """
-    Returns all of the follow sets in the grammar.
-    
-    :returns: A dictionary mapping each non-terminal to a set of terminals
-    """
     def follow_sets(self) -> Dict[str, Set[str]]:
+        """
+        Returns all of the follow sets in the grammar.
+
+        :returns: A dictionary mapping each non-terminal to a set of terminals
+        """
+
         # get first sets, add our terminals back in
         fs = self.first_sets()
         fs.update({x: {x} for x in self.terminals()})
@@ -302,21 +325,22 @@ class Grammar:
                 # stop
                 return ret
 
-    """
-    Produces a sequence of terminals out of a raw string.
-    
-    :param ip: An iterable of lines to lex.
-    :param spcl: Special rules to match.
-    These will substitute given regexes for tokens in the CFG instead of matching the text literally.
-    For example:
-    {
-        "ID": "[a-zA-Z]+"
-        "NUM": "\\d+"
-    }
-    
-    :returns: [(terminal in cfg, raw token)...]
-    """
     def lex(self, ip: Iterable[str], spcl: Dict[str, str] = None) -> Sequence[Tuple[str, str]]:
+        """
+        Produces a sequence of terminals out of a raw string.
+
+        :param ip: An iterable of lines to lex.
+        :param spcl: Special rules to match.
+        These will substitute given regexes for tokens in the CFG instead of matching the text literally.
+        For example:
+        {
+            "ID": "[a-zA-Z]+"
+            "NUM": "\\d+"
+        }
+
+        :returns: [(terminal in cfg, raw token)...]
+        """
+
         # cannot have mutable default arguments
         if spcl is None:
             spcl = {}
@@ -367,6 +391,9 @@ class Grammar:
         if not isinstance(other, Grammar):
             return False
         return self.__rules.values() == other.__rules.values()
+
+    def __hash__(self):
+        return hash((self.__rules.values(), self.__start))
 
     """
     Gets the rules for a given non-terminal.
