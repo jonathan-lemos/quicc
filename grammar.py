@@ -65,6 +65,7 @@ def tokenize(rhs: str) -> Tuple[str]:
 class Nonterm:
     __symbol: str = ""
     __productions: FrozenSet[Tuple[str]]
+    __hash: int
 
     def __init__(self, nt: str, *rhs: Union[str, Tuple[str]]):
         """
@@ -83,6 +84,8 @@ class Nonterm:
         else:
             self.__productions = frozenset(rhs)
 
+        self.__hash = hash((self.__symbol, self.__productions))
+
     def symbol(self) -> str:
         """
         Returns the symbol associated with a Nonterm
@@ -95,7 +98,7 @@ class Nonterm:
         return self.__symbol == other.__symbol and self.__productions == other.__productions
 
     def __hash__(self):
-        return hash((self.__symbol, self.__productions))
+        return self.__hash
 
     def __iter__(self) -> Iterator[Tuple[str]]:
         """
@@ -110,8 +113,9 @@ class Nonterm:
 class Grammar:
     __rules: Dict[str, Nonterm] = {}
     __terminals: Set[str] = set()
-    __ent: Union[Set[str], None] = None
+    __ent: Set[str]
     __start: str = ""
+    __hash: int
 
     def __init_iter_str(self, cfg: Iterable[str]) -> None:
         """
@@ -188,6 +192,27 @@ class Grammar:
             tmp: List[Tuple[str, Sequence[str]]] = tmp
             self.__init_tuple(tmp)
 
+        self.__hash = hash((self.__rules.values(), self.__start))
+
+        # calculate epsilon nonterms
+        ret = {"#"}
+        # while the set is changing
+        while True:
+            len_tmp = len(ret)
+            for nt, prod in self:
+                hit = False
+                for token in prod:
+                    # if the token is not in our current set of epsilons, stop
+                    if token not in ret:
+                        hit = True
+                        break
+                # if all the tokens could produce epsilon, add it to our set
+                if not hit:
+                    ret |= {nt}
+            # if the set didn't change on this iteration, break
+            if len_tmp == len(ret):
+                self.__ent = ret
+
     def start(self) -> str:
         """
         Returns the start symbol of the grammar
@@ -213,28 +238,7 @@ class Grammar:
         """
         Returns all of the non-terminals that can produce epsilon.
         """
-        if self.__ent is not None:
-            return self.__ent
-
-        ret = {"#"}
-
-        # while the set is changing
-        while True:
-            len_tmp = len(ret)
-            for nt, prod in self:
-                hit = False
-                for token in prod:
-                    # if the token is not in our current set of epsilons, stop
-                    if token not in ret:
-                        hit = True
-                        break
-                # if all the tokens could produce epsilon, add it to our set
-                if not hit:
-                    ret |= {nt}
-            # if the set didn't change on this iteration, break
-            if len_tmp == len(ret):
-                self.__ent = ret
-                return ret
+        return self.__ent
 
     def first_sets(self) -> Dict[str, Set[str]]:
         """
@@ -390,10 +394,12 @@ class Grammar:
     def __eq__(self, other):
         if not isinstance(other, Grammar):
             return False
-        return self.__rules.values() == other.__rules.values()
+        # if hash(self) == hash(other):
+        #    return True
+        return self.__rules == other.__rules
 
     def __hash__(self):
-        return hash((self.__rules.values(), self.__start))
+        return self.__hash
 
     """
     Gets the rules for a given non-terminal.

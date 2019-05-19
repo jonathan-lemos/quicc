@@ -17,11 +17,8 @@ class ParserTest(unittest.TestCase):
 
     def test_epsilon(self):
         x = Grammar([
-            "S -> A B C",
-            "A -> a | #",
-            "B -> A D | b",
-            "C -> c",
-            "D -> d | #"
+            "E -> E + T | E",
+            "T -> T x F | F"
         ])
         y = LR1Parser(x)
 
