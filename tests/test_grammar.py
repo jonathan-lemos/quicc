@@ -2,7 +2,7 @@ from grammar import Grammar
 import unittest
 
 
-class FirstFollowSets(unittest.TestCase):
+class GrammarTests(unittest.TestCase):
     def test_basic(self):
         x = Grammar([
             "S -> C C",
@@ -41,3 +41,21 @@ class FirstFollowSets(unittest.TestCase):
             "C": {"c"},
             "D": {"d", "#"},
         })
+
+    def test_lexer_prefix1(self):
+        x = Grammar([
+            "S -> abc | abcd"
+        ])
+        self.assertEqual(
+            x.lex("abcd abc"),
+            [("abcd", "abcd"), ("abc", "abc")],
+        )
+
+    def test_lexer_prefix2(self):
+        x = Grammar([
+            "S -> abc | ID"
+        ])
+        self.assertEqual(
+            x.lex("abcd abc", {"ID": ".+"}),
+            [("abcd", "abcd"), ("abc", "abc")],
+        )

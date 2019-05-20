@@ -2,6 +2,7 @@ from grammar import Grammar
 from collections import deque
 from typing import Deque, Dict, FrozenSet, Iterable, Iterator, List, Set, Tuple, Sequence, Union
 import cProfile
+from copy import copy
 
 
 class ItemException(Exception):
@@ -36,8 +37,8 @@ def lookahead(prod: Sequence[str], dotpos: int, grammar: Grammar) -> Set[str]:
                         break
                 else:
                     nt_passed.add(token)
-                    for nt, p in filter(lambda x: x[0] == token, grammar):
-                        stk.append(p)
+                    for prod in grammar[token]:
+                        stk.append(prod)
             else:
                 ret.add(token)
             if token not in epsilons:
@@ -82,6 +83,7 @@ class Item:
         hit: Set["Item"] = set()
         q: Deque["Item"] = deque([self])
         nonterms = set(grammar.nonterms())
+        lookahead_buf: Dict[Sequence[str], Set[str]] = {}
 
         parent_follows = {self: lookahead(self.prod(), self.dotpos(), grammar)}
         if "$$" in parent_follows[self]:
@@ -101,7 +103,13 @@ class Item:
                 for prod in grammar[sym]:
                     tmp = Item(sym, prod, parent_follows[n], 0)
                     q.append(tmp)
-                    lh = lookahead(prod, 0, grammar)
+
+                    if prod in lookahead_buf:
+                        lh = copy(lookahead_buf[prod])
+                    else:
+                        lh = lookahead(prod, 0, grammar)
+                        lookahead_buf[prod] = copy(lh)
+
                     if "$$" in lh:
                         lh -= {"$$"}
                         lh |= parent_follows[n]
@@ -121,7 +129,7 @@ class Item:
         self.__prod = prod
         self.__follow = follow
         self.__dotpos = dotpos
-        self.__hash = hash(self.__nt) + hash(self.__prod) + hash(tuple(sorted(self.__follow))) + self.__dotpos
+        self.__hash = hash((self.__nt, self.__prod, tuple(sorted(self.__follow)), self.__dotpos))
 
     def __str__(self):
         return self.__nt + " -> " + " ".join(self.__prod[0:self.__dotpos]) + " . " + " ".join(self.__prod[self.__dotpos:]) + " {" + ",".join(self.__follow) + "}"
@@ -352,4 +360,5 @@ def main():
 
 
 if __name__ == '__main__':
+    # main()
     cProfile.run("main()", sort='cumtime')

@@ -212,6 +212,7 @@ class Grammar:
             # if the set didn't change on this iteration, break
             if len_tmp == len(ret):
                 self.__ent = ret
+                break
 
     def start(self) -> str:
         """
