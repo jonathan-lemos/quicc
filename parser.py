@@ -1,7 +1,6 @@
 from grammar import Grammar
 from collections import deque
-from typing import Deque, Dict, FrozenSet, Iterable, Iterator, List, Set, Tuple, Sequence, Union
-import cProfile
+from typing import Callable, Deque, Dict, FrozenSet, Iterable, Iterator, List, Set, Tuple, Sequence, Union
 from copy import copy
 
 
@@ -135,6 +134,24 @@ class Item:
         return self.__nt + " -> " + " ".join(self.__prod[0:self.__dotpos]) + " . " + " ".join(self.__prod[self.__dotpos:]) + " {" + ",".join(self.__follow) + "}"
 
 
+def resolve_shift(i1: Item, i2: Item) -> Item:
+    if i1.is_reduce():
+        return i2
+    return i1
+
+
+def resolve_reduce(i1: Item, i2: Item) -> Item:
+    if i2.is_reduce():
+        return i2
+    return i1
+
+
+def resolve_throw(i1: Item, i2: Item) -> Item:
+    if i1.is_reduce() and i2.is_reduce():
+        raise ItemException("reduce/reduce conflict (\"" + str(i1) + "\", \"" + str(i2) + "\")")
+    raise ItemException("shift/reduce conflict (\"" + str(i1) + "\", \"" + str(i2) + "\")")
+
+
 class ItemSet:
     __items: Sequence[Item]
     __shift: Dict[str, Tuple[int, Item]]
@@ -142,7 +159,7 @@ class ItemSet:
     __hash: int
 
     @staticmethod
-    def generate(base: Sequence[Item], grammar: Grammar) -> Sequence["ItemSet"]:
+    def generate(base: Sequence[Item], grammar: Grammar, resolver: Callable[[Item, Item], Item] = resolve_throw) -> Sequence["ItemSet"]:
         ret: List["ItemSet"] = [ItemSet(base, {}, {})]
         hit: Dict[Sequence[Item], int] = {base: 0}
 
@@ -152,17 +169,26 @@ class ItemSet:
                 if item.is_reduce():
                     for char in item.follow():
                         if char in ret[i].__reduce and ret[i].__reduce[char].nt() != item.nt():
-                            raise ItemException("reduce/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
-                            pass
+                            ret[i].__reduce[char] = resolver(ret[i].__reduce[char], item)
                         if char in ret[i].__shift:
-                            raise ItemException("shift/reduce conflict (\"" + str(ret[i].__shift[char][1]) + "\", \"" + str(item) + "\")")
-                            pass
+                            res = resolver(ret[i].__shift[char][1], item)
+                            if res.is_reduce():
+                                del ret[i].__shift[char]
+                                ret[i].__reduce[char] = item
+                            else:
+                                # shift is already in correct spot
+                                pass
                         ret[i].__reduce[char] = item
                 else:
                     char = item.current()
                     if char in ret[i].__reduce:
-                        raise ItemException("shift/reduce conflict (\"" + str(ret[i].__reduce[char]) + "\", \"" + str(item) + "\")")
-                        pass
+                        res = resolver(ret[i].__reduce[char], item)
+                        if res.is_reduce():
+                            # do nothing with the current shift
+                            continue
+                        else:
+                            del ret[i].__reduce[char]
+                            # now deal with the shift
 
                     target = item.advanced().closure(grammar)
 
@@ -216,9 +242,6 @@ class ItemSet:
 
     def __str__(self) -> str:
         vdict = {x[1]: x[0] for x in self.__shift.values()}
-
-        def shift2string(x: Tuple[int, Item]):
-            return str(x[1]) + " (S" + str(x[0]) + ")"
 
         ret = ""
         for item in self:
@@ -302,63 +325,5 @@ class LR1Parser:
             else:
                 raise ParseException("No transition defined at state " + str(state) + " for symbol " + str(look))
 
-
     def __str__(self) -> str:
         return "\n".join(str(x[0]) + ":\n" + str(x[1]) + "\n" for x in enumerate(self.__sets)).strip()
-
-
-def main():
-    x = Grammar([
-        "program -> declaration-list",
-        "declaration-list -> declaration-list declaration | declaration",
-        "declaration -> var-declaration | fun-declaration",
-        "var-declaration -> TYPE ID ; | TYPE ID [ NUM ] ;",
-        "fun-declaration -> TYPE ID ( params ) compound-stmt",
-        "params -> param-list | void",
-        "param-list -> param-list , param | param",
-        "param -> TYPE ID | TYPE ID [ ]",
-        "TYPE -> int | float | void",
-        "compound-stmt -> { local-declarations statement-list }",
-        "local-declarations -> local-declarations var-declaration | #",
-        "statement-list -> statement-list statement | #",
-        "statement -> expression-stmt | compound-stmt | selection-stmt | iteration-stmt | return-stmt",
-        "expression-stmt -> expression ; | ;",
-#       "selection-stmt -> if ( expression ) statement | if ( expression ) statement else statement",
-        "selection-stmt -> if ( expression ) statement",
-        "iteration-stmt -> while ( expression ) statement",
-        "return-stmt -> return ; | return expression ;",
-        "expression -> var = expression | simple-expression",
-        "var -> ID | ID [ expression ]",
-        "simple-expression -> additive-expression RELOP additive-expression | additive-expression",
-        "additive-expression -> additive-expression ADDOP term | term",
-        "term -> term MULOP factor | factor",
-        "factor -> ( expression ) | var | call | NUM",
-        "call -> ID ( args )",
-        "args -> arg-list | #",
-        "arg-list -> arg-list , expression | expression",
-    ])
-    tokens = x.lex([
-        "void x(void) {",
-        "   return;",
-        "}"
-        "int main(void) {",
-        "   return 0;",
-        "}"
-    ], {
-        "NUM": "[0-9]+\\.[0-9]+|[0-9]+",
-        "ID": "[A-Za-z]+",
-        "RELOP": "<=|<|>|>=|==|!=",
-        "ADDOP": "[+\\-]",
-        "MULOP": "[*/]",
-    })
-    a = x.follow_sets()
-    b = x.first_sets()
-    y = LR1Parser(x)
-    print(str(y))
-    y.parse(tokens)
-    z = 2 + 2
-
-
-if __name__ == '__main__':
-    # main()
-    cProfile.run("main()", sort='cumtime')

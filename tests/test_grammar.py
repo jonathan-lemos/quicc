@@ -1,15 +1,8 @@
-from grammar import Grammar
+from grammar import CFGException, Grammar
 import unittest
 
 
-class GrammarTests(unittest.TestCase):
-    def test_basic(self):
-        x = Grammar([
-            "S -> C C",
-            "C -> e C | d",
-        ])
-        self.assertEqual(x.first_sets(), {"S": {"e", "d"}, "C": {"e", "d"}})
-
+class EqTests(unittest.TestCase):
     def test_multirule(self):
         w = Grammar([
             "S -> a b c",
@@ -25,6 +18,15 @@ class GrammarTests(unittest.TestCase):
         ])
         self.assertEqual(w, x)
         self.assertEqual(x, y)
+
+
+class FirstFollowTests(unittest.TestCase):
+    def test_basic(self):
+        x = Grammar([
+            "S -> C C",
+            "C -> e C | d",
+        ])
+        self.assertEqual(x.first_sets(), {"S": {"e", "d"}, "C": {"e", "d"}})
 
     def test_epsilon(self):
         x = Grammar([
@@ -42,12 +44,14 @@ class GrammarTests(unittest.TestCase):
             "D": {"d", "#"},
         })
 
+
+class LexTests(unittest.TestCase):
     def test_lexer_prefix1(self):
         x = Grammar([
             "S -> abc | abcd"
         ])
         self.assertEqual(
-            x.lex("abcd abc"),
+            x.lex(["abcd abc"]),
             [("abcd", "abcd"), ("abc", "abc")],
         )
 
@@ -56,6 +60,15 @@ class GrammarTests(unittest.TestCase):
             "S -> abc | ID"
         ])
         self.assertEqual(
-            x.lex("abcd abc", {"ID": ".+"}),
-            [("abcd", "abcd"), ("abc", "abc")],
+            x.lex(["abcd abc"], {"ID": "[a-z]+"}),
+            [("ID", "abcd"), ("abc", "abc")],
         )
+
+    def test_terminal(self):
+        x = Grammar([
+            "S -> A B",
+            "A -> c | d",
+            "B -> ef | g S",
+        ])
+
+        self.assertRaises(CFGException, lambda: x.lex(["d A"]))
