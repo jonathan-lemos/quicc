@@ -1,6 +1,7 @@
 import cProfile
 from grammar import Grammar
-from parser import LR1Parser
+from parser import LR1Parser, resolve_shift
+
 
 def main():
     x = Grammar([
@@ -19,7 +20,6 @@ def main():
         "statement -> expression-stmt | compound-stmt | selection-stmt | iteration-stmt | return-stmt",
         "expression-stmt -> expression ; | ;",
         "selection-stmt -> if ( expression ) statement | if ( expression ) statement else statement",
-#        "selection-stmt -> if ( expression ) statement",
         "iteration-stmt -> while ( expression ) statement",
         "return-stmt -> return ; | return expression ;",
         "expression -> var = expression | simple-expression",
@@ -32,10 +32,15 @@ def main():
         "args -> arg-list | #",
         "arg-list -> arg-list , expression | expression",
     ])
+
     tokens = x.lex([
         "void x(void) {",
-        "   return;",
-        "}"
+        "   if (1 > 0) {"
+        "       return;",
+        "   } else {",
+        "       2 + 2;",
+        "   }",
+        "}",
         "int main(void) {",
         "   return 0;",
         "}"
@@ -46,9 +51,8 @@ def main():
         "ADDOP": "[+\\-]",
         "MULOP": "[*/]",
     })
-    a = x.follow_sets()
-    b = x.first_sets()
-    y = LR1Parser(x)
+
+    y = LR1Parser(x, resolve_shift)
     print(str(y))
     y.parse(tokens)
     z = 2 + 2

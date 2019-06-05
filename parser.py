@@ -275,14 +275,14 @@ class LR1Parser:
     __sets: Sequence[ItemSet]
     __grammar: Grammar
 
-    def __init__(self, grammar: Grammar):
+    def __init__(self, grammar: Grammar, resolver: Callable[[Item, Item], Item]):
         self.__grammar = grammar
         old_start = grammar.start()
         new_start = old_start + "'"
         new_start_rule = new_start + " -> " + old_start
         g = Grammar([new_start_rule] + str(grammar).split("\n"))
         start_item = Item(new_start, (old_start,), {"$"}, 0)
-        self.__sets = ItemSet.generate(start_item.closure(g), g)
+        self.__sets = ItemSet.generate(start_item.closure(g), g, resolver)
 
     def parse(self, arg: Union[str, Sequence[Tuple[str, str]]]):
         if isinstance(arg, str):
