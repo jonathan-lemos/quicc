@@ -55,9 +55,8 @@ def main():
     y = LR1Parser(x, resolve_shift)
     print(str(y))
     y.parse(tokens)
-    z = 2 + 2
 
 
 if __name__ == '__main__':
-    # main()
-    cProfile.run("main()", sort='cumtime')
+    main()
+    # cProfile.run("main()", sort='cumtime')

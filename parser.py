@@ -248,10 +248,10 @@ class ItemSet:
             ret += str(item) + " "
             if item.is_reduce():
                 ret += "(R)"
-            elif item not in vdict:
-                ret += "(??)"
+            elif item.current() in self.__shift:
+                ret += "(S" + str(self.__shift[item.current()][0]) + ")"
             else:
-                ret += "(S" + str(vdict[item]) + ")"
+                ret += "(??)"
             ret += "\n"
         return ret.strip()
 
@@ -269,6 +269,32 @@ class ASTNode:
 
     def __iter__(self) -> Iterator[Union[Tuple[str, str], "ASTNode"]]:
         return iter(self.__children)
+
+
+class ParseTreeNode:
+    __sym: str
+    __children: Sequence["ParseTreeNode"]
+
+    def __init__(self, sym: str, children: Sequence["ParseTreeNode"]):
+        self.__sym = sym
+        self.__children = children
+
+    def sym(self) -> str:
+        return self.__sym
+
+    def children(self) -> Sequence["ParseTreeNode"]:
+        return self.__children
+
+    def __hash__(self):
+        return hash((self.__sym, self.__children))
+
+    def __eq__(self, other):
+        if not isinstance(other, ParseTreeNode):
+            return False
+        return self.__sym == other.__sym and self.__children == other.__children
+
+    def __str__(self):
+        return self.__sym
 
 
 class LR1Parser:
@@ -292,36 +318,55 @@ class LR1Parser:
         triples: Deque[Tuple[str, str]] = deque(arg)
         triples.append(("$", "$"))
 
-        stack: Deque[Union[str, int]] = deque(["$", 0])
+        stack: Deque[Union[ParseTreeNode, int]] = deque(["$", 0])
 
         while True:
             look, raw = triples[0]
             state: int = stack[len(stack) - 1]
 
+            # if we can shift on the lookahead symbol
             if look in self.__sets[state].shift():
+                # pop the state
                 triples.popleft()
-                stack.append(look)
+                # push the symbol
+                stack.append(ParseTreeNode(look, []))
+                # push the new state
                 stack.append(self.__sets[state].shift()[look][0])
-            elif look in self.__sets[state].reduce():
-                item = self.__sets[state].reduce()[look]
+
+            # if we can reduce on the lookahead symbol or epsilon
+            elif look in self.__sets[state].reduce() or "#" in self.__sets[state].reduce():
+                # get the item associated with the current lookahead
+                item = self.__sets[state].reduce()[look if look in self.__sets[state].reduce() else "#"]
+                # save the children
+                children = []
+                # pop each symbol in reverse
                 for x in reversed(item.prod()):
                     if len(stack) < 3:
                         raise ParseException("Cannot reduce on stack without at least 3 elements")
                     if not isinstance(stack.pop(), int):
                         raise ParseException("Internal error: expected to pop state, but popped token was not of type int")
                     tmp = stack.pop()
-                    if tmp != x:
-                        raise ParseException("Internal error: popped token \"" + tmp + "\" does not match expected token \"" + x + "\"")
+                    if tmp.sym() != x:
+                        raise ParseException("Internal error: popped token \"" + tmp.sym() + "\" does not match expected token \"" + x + "\"")
+                    children.append(tmp)
+                # set the state to what's on top of the stack
                 state = stack[len(stack) - 1]
+                # if the new state cannot shift on what was reduced, there is an error in the parser
                 if item.nt() not in self.__sets[state].shift():
                     raise ParseException("Internal error: reduced item set does not have transition for \"" + item.nt() + "\"")
+                # if we reduced on the start symbol and there are no more symbols to read, parsing was successful
                 if item.nt() == self.__grammar.start() and look == "$":
                     return
-                stack.append(item.nt())
+                # push the symbol we reduced to
+                stack.append(ParseTreeNode(item.nt(), children))
+                # shift on the symbol we pushed, push the new state
                 stack.append(self.__sets[state].shift()[item.nt()][0])
+
+            # otherwise try shifting on epsilon
             elif "#" in self.__sets[state].shift():
-                stack.append("#")
+                stack.append(ParseTreeNode("#", []))
                 stack.append(self.__sets[state].shift()["#"][0])
+
             else:
                 raise ParseException("No transition defined at state " + str(state) + " for symbol " + str(look))
 
